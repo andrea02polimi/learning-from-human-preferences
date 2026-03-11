@@ -19,7 +19,8 @@ import [31mjoblib[m[32mcloudpickle[m
 import [31mlogging[m[32measy_tf_log[m
 import numpy as np[m
 [32mfrom numpy.testing import assert_equal[m
-import tensorflow as tf[m
+import tensorflow.compat.v1 as tf
+tf.disable_v2_behavior()[m
 [31mfrom baselines import logger[m
 
 from [31mbaselines.common[m[32ma2c[m import [31mset_global_seeds, explained_variance[m[32mlogger[m
@@ -469,7 +470,8 @@ def learn(policy,
 [1m+++ b/baselines/a2c/policies.py[m
 [36m@@ -1,9 +1,6 @@[m
 import numpy as np[m
-import tensorflow as tf[m
+import tensorflow.compat.v1 as tf
+tf.disable_v2_behavior()[m
 from [31mbaselines.a2c.utils[m[32ma2c.a2c.utils[m import conv, fc, conv_to_fc, batch_to_seq, seq_to_batch, lstm, lnlstm, [31msample, check_shape[m
 [31mfrom baselines.common.distributions import make_pdtype[m
 [31mimport baselines.common.tf_util as U[m
@@ -536,7 +538,8 @@ class LnLstmPolicy(object):[m
 import os[m
 [31mimport gym[m
 import numpy as np[m
-import tensorflow as tf[m
+import tensorflow.compat.v1 as tf
+tf.disable_v2_behavior()[m
 [31mfrom gym import spaces[m
 from collections import deque[m
 
