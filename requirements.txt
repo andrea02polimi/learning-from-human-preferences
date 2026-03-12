@@ -1,0 +1,19 @@
+# Core ML
+tensorflow==1.15.5
+
+# RL environments
+gym==0.21.0
+gym-moving-dot
+
+# Scientific computing
+numpy==1.23.5
+scipy==1.10.1
+
+# Visualization / rendering
+pyglet==1.5.27
+opencv-python==4.8.1.78
+
+# Utilities
+cloudpickle==2.2.1
+tqdm==4.66.1
+memory-profiler==0.61.0
