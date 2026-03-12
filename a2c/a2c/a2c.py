@@ -5,6 +5,9 @@ import time
 
 import cloudpickle
 import easy_tf_log
+from tensorflow.summary import create_file_writer
+
+writer = create_file_writer("runs")
 import numpy as np
 from numpy.testing import assert_equal
 import tensorflow.compat.v1 as tf
@@ -383,22 +386,11 @@ def learn(policy,
     fps_tstart = time.time()
     fps_nsteps = 0
 
-    print("Starting workers")
-
-    # Before we're told to start training the policy itself,
-    # just generate segments for the reward predictor to be trained with
-    while True:
-        runner.run()
-        try:
-            start_policy_training_pipe.get(block=False)
-        except queue.Empty:
-            continue
-        else:
-            break
-
     print("Starting policy training")
 
-    for update in range(1, total_timesteps // nbatch + 1):
+    nupdates = max(1, total_timesteps // nbatch)
+
+    for update in range(1, nupdates + 1):
         # Run for nsteps
         obs, states, rewards, masks, actions, values = runner.run()
 

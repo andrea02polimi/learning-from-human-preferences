@@ -11,7 +11,9 @@ from itertools import combinations
 from multiprocessing import Queue
 from random import shuffle
 
-import easy_tf_log
+from tensorflow.summary import create_file_writer
+
+writer = create_file_writer("runs")
 import numpy as np
 
 from utils import VideoRenderer

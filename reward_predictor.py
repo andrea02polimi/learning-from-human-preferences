@@ -2,7 +2,9 @@ import logging
 import os.path as osp
 import time
 
-import easy_tf_log
+from tensorflow.summary import create_file_writer
+
+writer = create_file_writer("runs")
 import numpy as np
 from numpy.testing import assert_equal
 import tensorflow.compat.v1 as tf

@@ -5,10 +5,19 @@ import os
 from os import path as osp
 import sys
 import time
+
+import logging
+import os
+import sys
+import multiprocessing as mp
+mp.set_start_method("fork", force=True)
+
 from multiprocessing import Process, Queue
 
 import cloudpickle
-import easy_tf_log
+from tensorflow.summary import create_file_writer
+
+writer = create_file_writer("runs")
 from a2c import logger
 from a2c.a2c.a2c import learn
 from a2c.a2c.policies import CnnPolicy, MlpPolicy
@@ -50,7 +59,11 @@ def run(general_params,
     else:
         episode_vid_queue = episode_renderer = None
 
-    if a2c_params['env_id'] in ['MovingDot-v0', 'MovingDotNoFrameskip-v0']:
+    if a2c_params['env_id'] in [
+        'MovingDot-v0',
+        'MovingDotNoFrameskip-v0',
+        'MovingDotDiscreteNoFrameskip-v0'
+    ]:
         reward_predictor_network = net_moving_dot_features
     elif a2c_params['env_id'] in ['PongNoFrameskip-v4', 'EnduroNoFrameskip-v4']:
         reward_predictor_network = net_cnn
@@ -134,7 +147,8 @@ def run(general_params,
             log_dir=general_params['log_dir'],
             a2c_params=a2c_params)
         start_policy_training_flag.put(True)
-        a2c_proc.join()
+        if a2c_proc is not None:
+            a2c_proc.join()
         env.close()
     elif general_params['mode'] == 'train_policy_with_preferences':
         cluster_dict = create_cluster_dict(['ps', 'a2c', 'train'])
@@ -222,8 +236,7 @@ def make_envs(env_id, n_envs, seed):
             return make_env(env_id, seed + rank)
         return _thunk
     set_global_seeds(seed)
-    env = SubprocVecEnv(env_id, [wrap_make_env(env_id, i)
-                                 for i in range(n_envs)])
+    env = SubprocVecEnv(env_id, [wrap_make_env(env_id, i) for i in range(n_envs)])
     return env
 
 
@@ -233,7 +246,7 @@ def start_parameter_server(cluster_dict, make_reward_predictor):
         while True:
             time.sleep(1.0)
 
-    proc = Process(target=f, daemon=True)
+    proc = Process(target=f)
     proc.start()
     return proc
 
@@ -242,7 +255,11 @@ def start_policy_training(cluster_dict, make_reward_predictor, gen_segments,
                           start_policy_training_pipe, seg_pipe,
                           episode_vid_queue, log_dir, a2c_params):
     env_id = a2c_params['env_id']
-    if env_id in ['MovingDotNoFrameskip-v0', 'MovingDot-v0']:
+    if env_id in [
+        'MovingDotNoFrameskip-v0',
+        'MovingDot-v0',
+        'MovingDotDiscreteNoFrameskip-v0'
+    ]:
         policy_fn = MlpPolicy
     elif env_id in ['PongNoFrameskip-v4', 'EnduroNoFrameskip-v4']:
         policy_fn = CnnPolicy
@@ -267,7 +284,7 @@ def start_policy_training(cluster_dict, make_reward_predictor, gen_segments,
         else:
             reward_predictor = None
         misc_logs_dir = osp.join(log_dir, 'a2c_misc')
-        easy_tf_log.set_dir(misc_logs_dir)
+        # easy_tf_log.set_dir(misc_logs_dir)
         learn(
             policy=policy_fn,
             env=env,
@@ -279,9 +296,8 @@ def start_policy_training(cluster_dict, make_reward_predictor, gen_segments,
             gen_segments=gen_segments,
             **a2c_params)
 
-    proc = Process(target=f, daemon=True)
-    proc.start()
-    return env, proc
+    f()
+    return env, None
 
 
 def start_pref_interface(seg_pipe, pref_pipe, max_segs, synthetic_prefs,
@@ -298,7 +314,7 @@ def start_pref_interface(seg_pipe, pref_pipe, max_segs, synthetic_prefs,
     pi = PrefInterface(synthetic_prefs=synthetic_prefs,
                        max_segs=max_segs,
                        log_dir=prefs_log_dir)
-    proc = Process(target=f, daemon=True)
+    proc = Process(target=f)
     proc.start()
     return pi, proc
 
@@ -375,7 +391,7 @@ def start_reward_predictor_training(cluster_dict,
             if i and i % ckpt_interval == 0:
                 rew_pred.save()
 
-    proc = Process(target=f, daemon=True)
+    proc = Process(target=f)
     proc.start()
     return proc
 

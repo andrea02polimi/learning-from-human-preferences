@@ -226,11 +226,24 @@ def batch_iter(data, batch_size, shuffle=False):
 
 
 def make_env(env_id, seed=0):
-    if env_id in ['MovingDot-v0', 'MovingDotNoFrameskip-v0']:
+    if env_id in [
+        'MovingDot-v0',
+        'MovingDotNoFrameskip-v0',
+        'MovingDotDiscreteNoFrameskip-v0',
+        'MovingDotDiscrete-v0',
+        'MovingDotContinuous-v0',
+        'MovingDotContinuousNoFrameskip-v0'
+    ]:
         import gym_moving_dot
+        env = gym.make(env_id)
+        env.seed(seed)
+        return env   # niente wrapper
+
     env = gym.make(env_id)
     env.seed(seed)
+
     if env_id == 'EnduroNoFrameskip-v4':
         from enduro_wrapper import EnduroWrapper
         env = EnduroWrapper(env)
+
     return wrap_deepmind(env)

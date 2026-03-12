@@ -1,4 +1,10 @@
 import collections
+import collections.abc
+
+collections.MutableMapping = collections.abc.MutableMapping
+collections.Mapping = collections.abc.Mapping
+collections.Sequence = collections.abc.Sequence
+
 import copy
 import gzip
 import pickle
@@ -7,7 +13,9 @@ import time
 import zlib
 from threading import Lock, Thread
 
-import easy_tf_log
+from tensorflow.summary import create_file_writer
+
+writer = create_file_writer("runs")
 import numpy as np
 
 
@@ -39,7 +47,7 @@ class Segment:
         return len(self.frames)
 
 
-class CompressedDict(collections.MutableMapping):
+class CompressedDict(collections.abc.MutableMapping):
 
     def __init__(self):
         self.store = dict()
