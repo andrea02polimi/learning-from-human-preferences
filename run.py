@@ -23,6 +23,7 @@ from a2c.a2c.a2c import learn
 from a2c.a2c.policies import CnnPolicy, MlpPolicy
 from a2c.common import set_global_seeds
 from a2c.common.vec_env.subproc_vec_env import SubprocVecEnv
+from a2c.common.vec_env.dummy_vec_env import DummyVecEnv
 from params import parse_args, PREFS_VAL_FRACTION
 from pref_db import PrefDB, PrefBuffer
 from pref_interface import PrefInterface
@@ -236,7 +237,11 @@ def make_envs(env_id, n_envs, seed):
             return make_env(env_id, seed + rank)
         return _thunk
     set_global_seeds(seed)
-    env = SubprocVecEnv(env_id, [wrap_make_env(env_id, i) for i in range(n_envs)])
+    # env = SubprocVecEnv(env_id, [wrap_make_env(env_id, i) for i in range(n_envs)])
+
+    env = DummyVecEnv([wrap_make_env(env_id, i)
+                       for i in range(n_envs)])
+
     return env
 
 
