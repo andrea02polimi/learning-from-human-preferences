@@ -52,7 +52,7 @@ Finally, before running any of the scripts, enter the environment with:
 
 ### Running
 
-All training is done using [`run.py`](run.py). Basic usage is:
+All training is done using [`run.py`](scripts/run.py). Basic usage is:
 
 `$ python3 run.py <mode> <environment>`
 
@@ -148,7 +148,7 @@ Check out runs reproducing the above results at
 ### Running checkpoints
 
 To run a trained policy checkpoint so you can see what the agent was doing, use
-[`run_checkpoint.py`](run_checkpoint.py) Basic usage is:
+[`run_checkpoint.py`](scripts/run_checkpoint.py) Basic usage is:
 
 `$ python3 run_checkpoint.py <environment> <policy checkpoint directory>`
 
@@ -160,9 +160,9 @@ For example, to run an agent saved in `runs/pong`:
 ## Architecture notes
 
 There are three main components:
-* The A2C workers ([`a2c/a2c/a2c.py`](a2c/a2c/a2c.py))
-* The preference interface ([`pref_interface.py`](pref_interface.py))
-* The reward predictor ([`reward_predictor.py`](reward_predictor.py))
+* The A2C workers ([`a2c/a2c/a2c.py`](src/learning_from_human_preferences/agents/a2c/a2c/a2c.py))
+* The preference interface ([`pref_interface.py`](src/learning_from_human_preferences/preferences/pref_interface.py))
+* The reward predictor ([`reward_predictor.py`](src/learning_from_human_preferences/reward_model/reward_predictor.py))
 
 ### Data flow
 
@@ -216,7 +216,7 @@ There are three tricky parts to this:
   the reward predictor training process are automatically replicated to the A2C
   worker process's network.
 
-All subprocesses are started and coordinated by [`run.py`](run.py).
+All subprocesses are started and coordinated by [`run.py`](scripts/run.py).
 
 ![](images/diagram.png)
 
@@ -237,8 +237,8 @@ paper.
   suggested a higher chance of successful training by just selecting video
   clips randomly (also noted by the paper in some situations), so we don't do
   any ensembling. (Ensembling code *is* implemented in
-  [`reward_predictor.py`](reward_predictor.py), but we always operate with only
-  a single-member ensemble, and [`pref_interface.py`](pref_interface.py) just
+  [`reward_predictor.py`](src/learning_from_human_preferences/reward_model/reward_predictor.py), but we always operate with only
+  a single-member ensemble, and [`pref_interface.py`](src/learning_from_human_preferences/preferences/pref_interface.py) just
   chooses segments randomly.)
 * The preference for each pair of video clips is calculated based on a softmax
   over the predicted latent reward values for each clip. In the paper,
@@ -285,7 +285,7 @@ for extensions and things to investigate:
   Comparisons](http://proceedings.mlr.press/v28/wauthier13.pdf)), then gives
   reward corresponding to the rank of the most similar video clip.
 * **Automatic reward shaping**. Watching the graph of rewards predicted by the
-  reward predictor (run [`run_checkpoint.py`](run_checkpoint.py) with a reward
+  reward predictor (run [`run_checkpoint.py`](scripts/run_checkpoint.py) with a reward
   predictor checkpoint), it looks like the predicted rewards might be slightly
   better-shaped than the original rewards, even when trained with synthetic
   preferences based on the original rewards. Specifically, in Pong, it looks
@@ -295,4 +295,4 @@ for extensions and things to investigate:
 
 ## Code credits
 
-A2C code in [`a2c`](a2c) is based on the implementation from [OpenAI's baselines](https://github.com/openai/baselines), commit [`f8663ea`](https://github.com/openai/baselines/commit/f8663ea).
+A2C code in [`a2c`](src/learning_from_human_preferences/agents/a2c) is based on the implementation from [OpenAI's baselines](https://github.com/openai/baselines), commit [`f8663ea`](https://github.com/openai/baselines/commit/f8663ea).

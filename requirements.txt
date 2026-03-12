@@ -17,3 +17,5 @@ opencv-python==4.8.1.78
 cloudpickle==2.2.1
 tqdm==4.66.1
 memory-profiler==0.61.0
+
+matplotlib==3.10.8
