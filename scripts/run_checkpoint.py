@@ -74,9 +74,9 @@ def update_obs(obs, raw_obs, nc):
 def get_reward_predictor(ckpt_dir):
     with open(osp.join(ckpt_dir, 'make_reward_predictor.pkl'), 'rb') as fh:
         make_reward_predictor = cloudpickle.loads(fh.read())
-    cluster_dict = {'a2c': ['localhost:2200']}
+    cluster_dict = {'a2c2': ['localhost:2200']}
     print("Initialising reward predictor...")
-    reward_predictor = make_reward_predictor(name='a2c', cluster_dict=cluster_dict)
+    reward_predictor = make_reward_predictor(name='a2c2', cluster_dict=cluster_dict)
     reward_predictor.init_network(ckpt_dir)
     return reward_predictor
 

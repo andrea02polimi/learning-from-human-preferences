@@ -1,6 +1,6 @@
 import numpy as np
 from multiprocessing import Process, Pipe
-from learning_from_human_preferences.agents.a2c.common.vec_env import VecEnv
+from agents.common.vec_env import VecEnv
 
 def worker(remote, env_fn_wrapper):
     env = env_fn_wrapper.x()

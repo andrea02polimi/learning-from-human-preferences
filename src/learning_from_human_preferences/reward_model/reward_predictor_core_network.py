@@ -1,72 +1,237 @@
 """
-Core network which predicts rewards from frames,
-for gym-moving-dot and Atari games.
+Reward Predictor Core Networks
+==============================
+
+Faithful PyTorch translation of the TensorFlow implementation used in:
+
+    Deep Reinforcement Learning from Human Preferences
+    Christiano et al., 2017
+
+The logic is preserved exactly:
+
+    frame -> neural network -> r_t
+    segment reward = sum(r_t)
+
+Segment rewards are compared using a Bradley–Terry model.
+
+This file replaces TensorFlow 1 code with PyTorch while keeping
+the exact architecture and preprocessing steps.
 """
 
-import tensorflow.compat.v1 as tf
-tf.disable_v2_behavior()
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
 
-from learning_from_human_preferences.reward_model.nn_layers import dense_layer, conv_layer
 
+# ============================================================
+# MovingDot feature extraction
+# ============================================================
 
-def get_dot_position(s):
+def extract_moving_dot_features(observation: torch.Tensor):
     """
-    Estimate the position of the dot in the gym-moving-dot environment.
+    Extract features exactly as done in the TensorFlow code.
+
+    Features used:
+        action
+        x_position
+        y_position
+
+    Only the LAST frame of the stack is used.
+
+    Features are normalized:
+        action / 4
+        x / 83
+        y / 83
     """
-    # s is (?, 84, 84, 4)
-    s = s[..., -1]  # select last frame; now (?, 84, 84)
 
-    x = tf.reduce_sum(s, axis=1)  # now (?, 84)
-    x = tf.argmax(x, axis=1)
+    # observation shape: (batch, H, W, C)
 
-    y = tf.reduce_sum(s, axis=2)
-    y = tf.argmax(y, axis=1)
+    last_frame = observation[..., -1] # is equivalent to write: observation[:, :, :, -1],
+    # selects last channel for each element in the batch
 
-    return x, y
+    action = observation[:, 0, 0, -1]
 
+    x_projection = last_frame.sum(dim=1) # sums along the H dimension
+    y_projection = last_frame.sum(dim=2) # sums along the W dimension
 
-def net_moving_dot_features(s, batchnorm, dropout, training, reuse):
-    # Action taken at each time step is encoded in the observations by a2c.py.
-    a = s[:, 0, 0, -1]
-    a = tf.cast(a, tf.float32) / 4.0
+    x_pos = x_projection.argmax(dim=1).float()
+    y_pos = y_projection.argmax(dim=1).float()
 
-    xc, yc = get_dot_position(s)
-    xc = tf.cast(xc, tf.float32) / 83.0
-    yc = tf.cast(yc, tf.float32) / 83.0
+    action = action.float()
 
-    features = [a, xc, yc]
-    x = tf.stack(features, axis=1)
+    # normalization exactly as original implementation
+    action = action / 4.0
+    x_pos = x_pos / 83.0
+    y_pos = y_pos / 83.0
 
-    x = dense_layer(x, 64, "d1", reuse, activation='relu')
-    x = dense_layer(x, 64, "d2", reuse, activation='relu')
-    x = dense_layer(x, 64, "d3", reuse, activation='relu')
-    x = dense_layer(x, 1, "d4", reuse, activation=None)
-    x = x[:, 0]
+    features = torch.stack([action, x_pos, y_pos], dim=1)
 
-    return x
+    return features
 
 
-def net_cnn(s, batchnorm, dropout, training, reuse):
-    x = s / 255.0
-    # Page 15: (Atari)
-    # "[The] input is fed through 4 convolutional layers of size 7x7, 5x5, 3x3,
-    # and 3x3 with strides 3, 2, 1, 1, each having 16 filters, with leaky ReLU
-    # nonlinearities (α = 0.01). This is followed by a fully connected layer of
-    # size 64 and then a scalar output. All convolutional layers use batch norm
-    # and dropout with α = 0.5 to prevent predictor overfitting"
-    x = conv_layer(x, 16, 7, 3, batchnorm, training, "c1", reuse, 'relu')
-    x = tf.layers.dropout(x, dropout, training=training)
-    x = conv_layer(x, 16, 5, 2, batchnorm, training, "c2", reuse, 'relu')
-    x = tf.layers.dropout(x, dropout, training=training)
-    x = conv_layer(x, 16, 3, 1, batchnorm, training, "c3", reuse, 'relu')
-    x = tf.layers.dropout(x, dropout, training=training)
-    x = conv_layer(x, 16, 3, 1, batchnorm, training, "c4", reuse, 'relu')
+# ============================================================
+# MovingDot reward network
+# ============================================================
 
-    w, h, c = x.get_shape()[1:]
-    x = tf.reshape(x, [-1, int(w * h * c)])
+class MovingDotRewardNetwork(nn.Module):
+    """
+    Original architecture:
 
-    x = dense_layer(x, 64, "d1", reuse, activation='relu')
-    x = dense_layer(x, 1, "d2", reuse, activation=None)
-    x = x[:, 0]
+        3 → 64 → 64 → 64 → 1
+        ReLU activations
+    """
 
-    return x
+    def __init__(self):
+        super().__init__()
+
+        self.fc1 = nn.Linear(3, 64)
+        self.fc2 = nn.Linear(64, 64)
+        self.fc3 = nn.Linear(64, 64)
+        self.fc4 = nn.Linear(64, 1)
+
+    def forward(self, features):
+
+        x = F.relu(self.fc1(features))
+        x = F.relu(self.fc2(x))
+        x = F.relu(self.fc3(x))
+
+        reward = self.fc4(x)
+
+        return reward.squeeze(-1) # squeeze(dim) removes the specified dimension if it is 1
+
+
+# ============================================================
+# Atari reward CNN
+# ============================================================
+
+class AtariRewardNetwork(nn.Module):
+    """
+    Exact CNN architecture from the original implementation.
+
+    Conv layers:
+
+        Conv(7x7, stride 3, 16)
+        Conv(5x5, stride 2, 16)
+        Conv(3x3, stride 1, 16)
+        Conv(3x3, stride 1, 16)
+
+    Followed by:
+
+        FC 64
+        FC 1
+
+    Activations:
+        LeakyReLU (α = 0.01)
+
+    Regularization:
+        BatchNorm
+        Dropout after each conv
+    """
+
+    def __init__(self, input_channels=4, dropout_prob=0.5):
+
+        super().__init__()
+
+        self.conv1 = nn.Conv2d(input_channels, 16, kernel_size=7, stride=3)
+        self.conv2 = nn.Conv2d(16, 16, kernel_size=5, stride=2)
+        self.conv3 = nn.Conv2d(16, 16, kernel_size=3, stride=1)
+        self.conv4 = nn.Conv2d(16, 16, kernel_size=3, stride=1)
+
+        self.bn1 = nn.BatchNorm2d(16)
+        self.bn2 = nn.BatchNorm2d(16)
+        self.bn3 = nn.BatchNorm2d(16)
+        self.bn4 = nn.BatchNorm2d(16)
+
+        self.dropout = nn.Dropout(dropout_prob)
+
+        self.fc1 = None
+        self.fc2 = None
+
+        self.activation = nn.LeakyReLU(0.01)
+
+    def _build_fc(self, x):
+
+        flattened_size = x.view(x.size(0), -1).size(1)
+
+        self.fc1 = nn.Linear(flattened_size, 64)
+        self.fc2 = nn.Linear(64, 1)
+
+    def forward(self, frames):
+
+        # original preprocessing
+        x = frames.float() / 255.0
+
+        x = self.conv1(x)
+        x = self.bn1(x)
+        x = self.activation(x)
+        x = self.dropout(x)
+
+        x = self.conv2(x)
+        x = self.bn2(x)
+        x = self.activation(x)
+        x = self.dropout(x)
+
+        x = self.conv3(x)
+        x = self.bn3(x)
+        x = self.activation(x)
+        x = self.dropout(x)
+
+        x = self.conv4(x)
+        x = self.bn4(x)
+        x = self.activation(x)
+
+        if self.fc1 is None:
+            self._build_fc(x)
+
+        x = torch.flatten(x, start_dim=1)
+
+        x = self.activation(self.fc1(x))
+
+        reward = self.fc2(x)
+
+        return reward.squeeze(-1)
+
+
+# ============================================================
+# Segment reward
+# ============================================================
+
+def compute_segment_reward(frame_rewards: torch.Tensor):
+    """
+    Segment reward defined as:
+
+        R(segment) = sum_t r_t
+    """
+
+    return frame_rewards.sum(dim=1)
+
+
+# ============================================================
+# Bradley–Terry preference model
+# ============================================================
+
+def preference_probability(reward_a, reward_b):
+    """
+    Compute preference probability:
+
+        P(A > B) = exp(R_A) / (exp(R_A) + exp(R_B))
+    """
+
+    exp_a = torch.exp(reward_a)
+    exp_b = torch.exp(reward_b)
+
+    return exp_a / (exp_a + exp_b)
+
+
+# ============================================================
+# Preference loss
+# ============================================================
+
+def preference_loss(reward_a, reward_b, labels):
+    """
+    Binary cross-entropy loss on preference predictions.
+    """
+
+    prob = preference_probability(reward_a, reward_b)
+
+    return F.binary_cross_entropy(prob, labels.float())

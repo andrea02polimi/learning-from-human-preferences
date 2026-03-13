@@ -13,10 +13,10 @@ from numpy.testing import assert_equal
 import tensorflow.compat.v1 as tf
 tf.disable_v2_behavior()
 
-from learning_from_human_preferences.agents.a2c import logger
-from learning_from_human_preferences.agents.a2c.a2c.utils import (cat_entropy, discount_with_dones,
-                                                                    find_trainable_variables, mse)
-from learning_from_human_preferences.agents.a2c.common import explained_variance, set_global_seeds
+from agents import logger
+from agents.a2c.utils import (cat_entropy, discount_with_dones,
+                              find_trainable_variables, mse)
+from agents.common import explained_variance, set_global_seeds
 from learning_from_human_preferences.preferences.pref_db import Segment
 
 

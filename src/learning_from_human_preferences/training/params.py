@@ -5,7 +5,7 @@ import subprocess
 import sys
 import time
 
-from learning_from_human_preferences.agents.a2c.a2c.utils import Scheduler
+from agents.a2c.utils import Scheduler
 
 
 def parse_args():

@@ -17,11 +17,11 @@ import cloudpickle
 from tensorflow.summary import create_file_writer
 
 writer = create_file_writer("runs")
-from learning_from_human_preferences.agents.a2c import logger
-from learning_from_human_preferences.agents.a2c.a2c.a2c import learn
-from learning_from_human_preferences.agents.a2c.a2c.policies import CnnPolicy, MlpPolicy
-from learning_from_human_preferences.agents.a2c.common import set_global_seeds
-from learning_from_human_preferences.agents.a2c.common.vec_env.dummy_vec_env import DummyVecEnv
+from agents import logger
+from agents.a2c.a2c import learn
+from agents.a2c.policies import CnnPolicy, MlpPolicy
+from agents.common import set_global_seeds
+from agents.common.vec_env.dummy_vec_env import DummyVecEnv
 from learning_from_human_preferences.training.params import parse_args, PREFS_VAL_FRACTION
 from learning_from_human_preferences.preferences.pref_db import PrefDB, PrefBuffer
 from learning_from_human_preferences.preferences.pref_interface import PrefInterface
@@ -150,7 +150,7 @@ def run(general_params,
             a2c_proc.join()
         env.close()
     elif general_params['mode'] == 'train_policy_with_preferences':
-        cluster_dict = create_cluster_dict(['ps', 'a2c', 'train'])
+        cluster_dict = create_cluster_dict(['ps', 'a2c2', 'train'])
         ps_proc = start_parameter_server(cluster_dict, make_reward_predictor)
         env, a2c_proc = start_policy_training(
             cluster_dict=cluster_dict,
@@ -223,7 +223,7 @@ def create_cluster_dict(jobs):
 
 
 def configure_a2c_logger(log_dir):
-    a2c_dir = osp.join(log_dir, 'a2c')
+    a2c_dir = osp.join(log_dir, 'a2c2')
     os.makedirs(a2c_dir)
     tb = logger.TensorBoardOutputFormat(a2c_dir)
     logger.Logger.CURRENT = logger.Logger(dir=a2c_dir, output_formats=[tb])
@@ -283,7 +283,7 @@ def start_policy_training(cluster_dict, make_reward_predictor, gen_segments,
 
     def f():
         if make_reward_predictor:
-            reward_predictor = make_reward_predictor('a2c', cluster_dict)
+            reward_predictor = make_reward_predictor('a2c2', cluster_dict)
         else:
             reward_predictor = None
         misc_logs_dir = osp.join(log_dir, 'a2c_misc')

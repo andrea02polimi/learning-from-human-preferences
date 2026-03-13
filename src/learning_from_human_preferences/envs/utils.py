@@ -8,7 +8,7 @@ import gym
 import numpy as np
 import pyglet
 
-from learning_from_human_preferences.agents.a2c.common.atari_wrappers import wrap_deepmind
+from agents.common.atari_wrappers import wrap_deepmind
 from scipy.ndimage import zoom
 
 
