@@ -1,47 +1,103 @@
-import tensorflow.compat.v1 as tf
-tf.disable_v2_behavior()
-
 """
-Wrappers for TensorFlow's layers integrating batchnorm in the right place.
+Modern PyTorch layer wrappers replacing the original TensorFlow layers.
+
+These wrappers preserve the same logical order used in the original code:
+
+Conv layer:
+    Conv2D → BatchNorm (optional) → LeakyReLU
+
+Dense layer:
+    Linear → Activation (optional)
+
+LeakyReLU uses alpha=0.01 exactly like the original TensorFlow implementation.
 """
 
+import torch
+import torch.nn as nn
 
-def conv_layer(x, filters, kernel_size, strides, batchnorm, training, name,
-               reuse, activation='relu'):
-    x = tf.layers.conv2d(
-        x,
-        filters,
+
+class ConvLayer(nn.Module):
+    """
+    Convolutional layer wrapper with optional BatchNorm and activation.
+
+    Original TensorFlow order:
+        conv → batchnorm → activation
+    """
+
+    def __init__(
+        self,
+        in_channels: int,
+        out_channels: int,
         kernel_size,
-        strides,
-        activation=None,
-        name=name,
-        reuse=reuse)
+        stride,
+        batchnorm: bool = False,
+        activation: str = "relu",
+    ):
+        super().__init__()
 
-    if batchnorm:
-        batchnorm_name = name + "_batchnorm"
-        x = tf.layers.batch_normalization(
-            x, training=training, reuse=reuse, name=batchnorm_name)
+        self.conv = nn.Conv2d(
+            in_channels=in_channels,
+            out_channels=out_channels,
+            kernel_size=kernel_size,
+            stride=stride,
+        )
 
-    if activation == 'relu':
-        x = tf.nn.leaky_relu(x, alpha=0.01)
-    else:
-        raise Exception("Unknown activation for conv_layer", activation)
+        self.use_batchnorm = batchnorm
 
-    return x
+        if batchnorm:
+            self.batchnorm = nn.BatchNorm2d(out_channels)
+
+        if activation == "relu":
+            # Original code actually used LeakyReLU(alpha=0.01)
+            self.activation = nn.LeakyReLU(negative_slope=0.01)
+        elif activation is None:
+            self.activation = None
+        else:
+            raise ValueError(f"Unknown activation type: {activation}")
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+
+        x = self.conv(x)
+
+        if self.use_batchnorm:
+            x = self.batchnorm(x)
+
+        if self.activation is not None:
+            x = self.activation(x)
+
+        return x
 
 
-def dense_layer(x,
-                units,
-                name,
-                reuse,
-                activation=None):
-    x = tf.layers.dense(x, units, activation=None, name=name, reuse=reuse)
+class DenseLayer(nn.Module):
+    """
+    Fully connected layer wrapper.
 
-    if activation is None:
-        pass
-    elif activation == 'relu':
-        x = tf.nn.leaky_relu(x, alpha=0.01)
-    else:
-        raise Exception("Unknown activation for dense_layer", activation)
+    Original TensorFlow order:
+        dense → activation
+    """
 
-    return x
+    def __init__(
+        self,
+        in_features: int,
+        out_features: int,
+        activation: str | None = None,
+    ):
+        super().__init__()
+
+        self.linear = nn.Linear(in_features, out_features)
+
+        if activation == "relu":
+            self.activation = nn.LeakyReLU(negative_slope=0.01)
+        elif activation is None:
+            self.activation = None
+        else:
+            raise ValueError(f"Unknown activation type: {activation}")
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+
+        x = self.linear(x)
+
+        if self.activation is not None:
+            x = self.activation(x)
+
+        return x

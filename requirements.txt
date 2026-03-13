@@ -1,21 +1,11 @@
-# Core ML
-tensorflow==1.15.5
+torch>=2.2
+torchvision>=0.17
 
-# RL environments
-gym==0.21.0
-gym-moving-dot
+gymnasium>=0.29
 
-# Scientific computing
-numpy==1.23.5
-scipy==1.10.1
+numpy>=1.26
+cloudpickle>=3.0
 
-# Visualization / rendering
-pyglet==1.5.27
-opencv-python==4.8.1.78
-
-# Utilities
-cloudpickle==2.2.1
-tqdm==4.66.1
-memory-profiler==0.61.0
-
-matplotlib==3.10.8
+tensorboard>=2.15
+matplotlib>=3.8
+tqdm>=4.66
