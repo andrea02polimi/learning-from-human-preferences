@@ -2,46 +2,27 @@
 PyTorch refactor of A2C used in
 Deep RL from Human Preferences.
 
-The algorithmic logic is preserved:
-
-rollout → segment generation → preference learning →
-reward predictor → A2C update
+rollout → segment generation → reward predictor → A2C update
 """
 
 import os
 import os.path as osp
-import time
 import queue
-import logging
 
 import numpy as np
 import torch
 import torch.nn.functional as F
-from torch.utils.tensorboard import SummaryWriter
 
 from agents.common import set_global_seeds, explained_variance
 from agents.a2c.utils import discount_with_dones
 from learning_from_human_preferences.preferences.pref_db import Segment
 
 
-writer = SummaryWriter("runs")
-
-
 # =========================================================
 # Model
 # =========================================================
 
-import torch
-import torch.nn.functional as F
-
-
 class Model:
-    """
-    PyTorch implementation of the A2C model used in
-    Deep RL from Human Preferences.
-
-    The training logic matches the original TensorFlow implementation.
-    """
 
     def __init__(
         self,
@@ -82,7 +63,6 @@ class Model:
         logits, values = self.policy(obs)
 
         probs = torch.softmax(logits, dim=1)
-
         actions = torch.multinomial(probs, 1).squeeze(1)
 
         return (
@@ -96,7 +76,6 @@ class Model:
     def value(self, obs, states, dones):
 
         obs = torch.tensor(obs).float()
-
         _, values = self.policy(obs)
 
         return values.detach().numpy()
@@ -110,68 +89,36 @@ class Model:
         rewards = torch.tensor(rewards).float()
         values = torch.tensor(values).float()
 
-        # --------------------------------------------
-        # Advantage
-        # --------------------------------------------
-
         advantages = rewards - values
 
         logits, value_pred = self.policy(obs)
 
-        # --------------------------------------------
-        # Policy loss
-        # --------------------------------------------
-
-        neglogpac = F.cross_entropy(
-            logits,
-            actions,
-            reduction="none"
-        )
-
+        neglogpac = F.cross_entropy(logits, actions, reduction="none")
         policy_loss = torch.mean(advantages * neglogpac)
-
-        # --------------------------------------------
-        # Value loss
-        # --------------------------------------------
 
         value_loss = F.mse_loss(value_pred.squeeze(), rewards)
 
-        # --------------------------------------------
-        # Entropy
-        # --------------------------------------------
-
         probs = torch.softmax(logits, dim=1)
-
         entropy = -(probs * torch.log(probs + 1e-8)).sum(dim=1).mean()
-
-        # --------------------------------------------
-        # Total loss
-        # --------------------------------------------
 
         loss = policy_loss - self.ent_coef * entropy + self.vf_coef * value_loss
 
         self.optimizer.zero_grad()
-
         loss.backward()
 
         torch.nn.utils.clip_grad_norm_(
             self.policy.parameters(),
-            self.max_grad_norm
+            self.max_grad_norm,
         )
 
         self.optimizer.step()
 
-        # --------------------------------------------
-        # Learning rate schedule (exact TF behavior)
-        # --------------------------------------------
-
-        batch_size = len(obs)  # = nenvs * nsteps
-
-        for _ in range(batch_size):
+        # learning rate schedule
+        for _ in range(len(obs)):
             current_lr = self.lr_scheduler.value()
 
-        for param_group in self.optimizer.param_groups:
-            param_group["lr"] = current_lr
+        for pg in self.optimizer.param_groups:
+            pg["lr"] = current_lr
 
         return (
             policy_loss.item(),
@@ -190,12 +137,6 @@ class Model:
 
         print("Saved policy checkpoint to", save_path)
 
-    # -----------------------------------------------------
-
-    def load(self, path):
-
-        self.policy.load_state_dict(torch.load(path))
-
 
 # =========================================================
 # Runner
@@ -213,7 +154,7 @@ class Runner:
         gen_segments,
         seg_pipe,
         reward_predictor,
-        episode_vid_queue
+        episode_vid_queue,
     ):
 
         self.env = env
@@ -225,7 +166,6 @@ class Runner:
         self.obs = np.zeros((nenv, nh, nw, nc * nstack), dtype=np.uint8)
 
         obs = env.reset()
-
         self.update_obs(obs)
 
         self.gamma = gamma
@@ -240,9 +180,6 @@ class Runner:
 
         self.segment = Segment()
 
-        self.orig_reward = [0 for _ in range(nenv)]
-
-        self.episode_frames = []
         self.episode_vid_queue = episode_vid_queue
 
     # -----------------------------------------------------
@@ -250,7 +187,6 @@ class Runner:
     def update_obs(self, obs):
 
         self.obs = np.roll(self.obs, shift=-1, axis=3)
-
         self.obs[:, :, :, -1] = obs[:, :, :, 0]
 
     # -----------------------------------------------------
@@ -265,16 +201,15 @@ class Runner:
 
             self.segment.append(
                 np.copy(e0_obs[step]),
-                np.copy(e0_rew[step])
+                np.copy(e0_rew[step]),
             )
 
             if len(self.segment) == 25 or e0_dones[step]:
 
                 while len(self.segment) < 25:
-
                     self.segment.append(e0_obs[step], 0)
 
-                self.segment.finalise()
+                self.segment.finalize()
 
                 try:
                     self.seg_pipe.put(self.segment, block=False)
@@ -289,11 +224,8 @@ class Runner:
 
         nenvs = self.env.num_envs
 
-        mb_obs = []
-        mb_rewards = []
-        mb_actions = []
-        mb_values = []
-        mb_dones = []
+        mb_obs, mb_rewards = [], []
+        mb_actions, mb_values, mb_dones = [], [], []
 
         mb_states = self.states
 
@@ -302,7 +234,7 @@ class Runner:
             actions, values, states = self.model.step(
                 self.obs,
                 self.states,
-                self.dones
+                self.dones,
             )
 
             mb_obs.append(np.copy(self.obs))
@@ -316,48 +248,25 @@ class Runner:
             self.dones = dones
 
             for n, done in enumerate(dones):
-
                 if done:
                     self.obs[n] *= 0
 
             self.update_obs(obs)
-
             mb_rewards.append(rewards)
 
         mb_dones.append(self.dones)
 
-        mb_obs = np.asarray(mb_obs, dtype=np.uint8).swapaxes(1, 0)
-        mb_rewards = np.asarray(mb_rewards, dtype=np.float32).swapaxes(1, 0)
-        mb_actions = np.asarray(mb_actions, dtype=np.int32).swapaxes(1, 0)
-        mb_values = np.asarray(mb_values, dtype=np.float32).swapaxes(1, 0)
-        mb_dones = np.asarray(mb_dones, dtype=bool).swapaxes(1, 0)
+        mb_obs = np.asarray(mb_obs).swapaxes(1, 0)
+        mb_rewards = np.asarray(mb_rewards).swapaxes(1, 0)
+        mb_actions = np.asarray(mb_actions).swapaxes(1, 0)
+        mb_values = np.asarray(mb_values).swapaxes(1, 0)
+        mb_dones = np.asarray(mb_dones).swapaxes(1, 0)
 
         mb_masks = mb_dones[:, :-1]
         mb_dones = mb_dones[:, 1:]
 
-        # ----------------------------------------------
-        # MovingDot action encoding
-        # ----------------------------------------------
-
-        if self.env.env_id == "MovingDotNoFrameskip-v0":
-
-            mb_obs[:, :, 0, 0, -1] = mb_actions[:, :]
-
-        # ----------------------------------------------
-        # Segment generation
-        # ----------------------------------------------
-
         if self.gen_segments:
-
-            self.update_segment_buffer(
-                mb_obs,
-                mb_rewards,
-                mb_dones
-            )
-
-        # ----------------------------------------------
-        # Reward predictor replacement
-        # ----------------------------------------------
+            self.update_segment_buffer(mb_obs, mb_rewards, mb_dones)
 
         if self.reward_predictor:
 
@@ -365,24 +274,17 @@ class Runner:
                 nenvs * self.nsteps,
                 84,
                 84,
-                4
+                4,
             )
 
             rewards_all = self.reward_predictor.reward(mb_obs_all)
 
-            mb_rewards = rewards_all.reshape(
-                nenvs,
-                self.nsteps
-            )
-
-        # ----------------------------------------------
-        # Discount rewards
-        # ----------------------------------------------
+            mb_rewards = rewards_all.reshape(nenvs, self.nsteps)
 
         last_values = self.model.value(
             self.obs,
             self.states,
-            self.dones
+            self.dones,
         ).tolist()
 
         for n, (rewards, dones, value) in enumerate(
@@ -397,7 +299,7 @@ class Runner:
                 rewards = discount_with_dones(
                     rewards + [value],
                     dones + [0],
-                    self.gamma
+                    self.gamma,
                 )[:-1]
 
             else:
@@ -405,7 +307,7 @@ class Runner:
                 rewards = discount_with_dones(
                     rewards,
                     dones,
-                    self.gamma
+                    self.gamma,
                 )
 
             mb_rewards[n] = rewards
@@ -418,7 +320,7 @@ class Runner:
             mb_rewards.flatten(),
             mb_masks.flatten(),
             mb_actions.flatten(),
-            mb_values.flatten()
+            mb_values.flatten(),
         )
 
 
@@ -429,16 +331,18 @@ class Runner:
 def learn(
     policy,
     env,
-    seed,
-    start_policy_training_pipe,
     seg_pipe,
+    start_policy_training_pipe,
+    episode_vid_queue,
     reward_predictor,
-    lr_scheduler,
     ckpt_save_dir,
+    gen_segments,
+    seed=0,
     total_timesteps=int(80e6),
     nsteps=5,
     nstack=4,
-    gamma=0.99
+    gamma=0.99,
+    lr_scheduler=None,
 ):
 
     set_global_seeds(seed)
@@ -451,14 +355,12 @@ def learn(
         policy,
         ob_space,
         ac_space,
-        nenvs,
-        nsteps,
         nstack,
-        lr_scheduler
+        lr_scheduler,
     )
 
     # ----------------------------------------------------
-    # Phase 1: collect initial preferences
+    # Phase 1: collect segments
     # ----------------------------------------------------
 
     runner = Runner(
@@ -467,10 +369,10 @@ def learn(
         nsteps,
         nstack,
         gamma,
-        gen_segments=True,
-        seg_pipe=seg_pipe,
-        reward_predictor=None,
-        episode_vid_queue=None
+        gen_segments,
+        seg_pipe,
+        None,
+        episode_vid_queue,
     )
 
     print("Collecting initial segments")
@@ -492,14 +394,13 @@ def learn(
         nsteps,
         nstack,
         gamma,
-        gen_segments=True,
-        seg_pipe=seg_pipe,
-        reward_predictor=reward_predictor,
-        episode_vid_queue=None
+        gen_segments,
+        seg_pipe,
+        reward_predictor,
+        episode_vid_queue,
     )
 
     nbatch = nenvs * nsteps
-
     nupdates = total_timesteps // nbatch
 
     for update in range(1, nupdates + 1):
@@ -512,7 +413,7 @@ def learn(
             rewards,
             masks,
             actions,
-            values
+            values,
         )
 
         if update % 100 == 0:
@@ -530,10 +431,10 @@ def learn(
 
             model.save(
                 osp.join(ckpt_save_dir, "policy"),
-                update
+                update,
             )
 
     model.save(
         osp.join(ckpt_save_dir, "policy"),
-        update
+        update,
     )

@@ -179,10 +179,11 @@ class PrefBuffer:
     Handles asynchronous reception of preferences.
     """
 
-    def __init__(self, train_db: PrefDB, val_db: PrefDB):
+    def __init__(self, db_train: PrefDB, db_val: PrefDB):
 
-        self.train_db = train_db
-        self.val_db = val_db
+        # keep original API used by run.py
+        self.train_db = db_train
+        self.val_db = db_val
 
         self.lock = Lock()
 

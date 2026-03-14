@@ -1,11 +1,35 @@
-torch>=2.2
-torchvision>=0.17
+# Core ML
+torch>=2.1
+torchvision>=0.16
+torchaudio>=2.1
 
+# TensorBoard logging
+tensorboard>=2.14
+
+# RL environments
 gymnasium>=0.29
+gymnasium[atari]>=0.29
+ale-py>=0.8
 
-numpy>=1.26
-cloudpickle>=3.0
+# Numerical computing
+numpy>=1.24
+scipy>=1.10
 
-tensorboard>=2.15
-matplotlib>=3.8
+# Image processing
+pillow>=10.0
+
+# Rendering
+pyglet>=2.0
+
+# Utilities
+cloudpickle>=2.2
 tqdm>=4.66
+
+# Memory profiling (optional but used in code)
+memory-profiler>=0.61
+
+# Compression utilities
+lz4>=4.3
+
+# Compatibility helpers
+typing-extensions>=4.8

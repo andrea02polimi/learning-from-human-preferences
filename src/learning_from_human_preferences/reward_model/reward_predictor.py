@@ -56,15 +56,24 @@ class RewardPredictorEnsemble:
         n_preds=1,
         log_dir=None,
         device="cpu",
+        cluster_job_name=None,
+        cluster_dict=None,
+        batchnorm=False,
+        dropout=0.0,
     ):
 
         self.device = device
         self.n_preds = n_preds
 
+        # kept for compatibility with original code
+        self.cluster_job_name = cluster_job_name
+        self.cluster_dict = cluster_dict
+        self.batchnorm = batchnorm
+        self.dropout = dropout
+
         self.models = []
         self.optimizers = []
 
-        # ensure independent networks
         for _ in range(n_preds):
 
             model = RewardPredictorNetwork(core_network()).to(device)
