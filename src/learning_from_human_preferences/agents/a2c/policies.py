@@ -1,168 +1,318 @@
 import numpy as np
-import tensorflow.compat.v1 as tf
-tf.disable_v2_behavior()
-from agents.a2c.utils import conv, fc, conv_to_fc, batch_to_seq, seq_to_batch, lstm, lnlstm, sample
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
 
-class LnLstmPolicy(object):
-    def __init__(self, sess, ob_space, ac_space, nenv, nsteps, nstack, nlstm=256, reuse=False):
-        nbatch = nenv*nsteps
+
+# =========================================================
+# Initialization (Baselines equivalent)
+# =========================================================
+
+def init_weights(module):
+    if isinstance(module, (nn.Conv2d, nn.Linear)):
+        nn.init.orthogonal_(module.weight, gain=np.sqrt(2))
+        nn.init.zeros_(module.bias)
+
+
+# =========================================================
+# Utilities
+# =========================================================
+
+def sample(logits):
+    probs = torch.softmax(logits, dim=1)
+    return torch.multinomial(probs, 1).squeeze(1)
+
+
+def nhwc_to_nchw(x):
+    return x.permute(0, 3, 1, 2)
+
+
+# =========================================================
+# Nature CNN
+# =========================================================
+
+class NatureCNN(nn.Module):
+
+    def __init__(self, input_channels):
+
+        super().__init__()
+
+        self.conv1 = nn.Conv2d(input_channels, 32, 8, stride=4)
+        self.conv2 = nn.Conv2d(32, 64, 4, stride=2)
+        self.conv3 = nn.Conv2d(64, 64, 3, stride=1)
+
+        self.fc = nn.Linear(3136, 512)
+
+        self.apply(init_weights)
+
+    def forward(self, x):
+
+        x = nhwc_to_nchw(x)
+        x = x / 255.0
+
+        x = F.relu(self.conv1(x))
+        x = F.relu(self.conv2(x))
+        x = F.relu(self.conv3(x))
+
+        x = torch.flatten(x, 1)
+
+        x = F.relu(self.fc(x))
+
+        return x
+
+
+# =========================================================
+# CNN Policy
+# =========================================================
+
+class CnnPolicy(nn.Module):
+
+    def __init__(self, ob_space, ac_space, nstack):
+
+        super().__init__()
+
         nh, nw, nc = ob_space.shape
-        ob_shape = (nbatch, nh, nw, nc*nstack)
-        nact = ac_space.n
-        X = tf.placeholder(tf.uint8, ob_shape) #obs
-        M = tf.placeholder(tf.float32, [nbatch]) #mask (done t-1)
-        S = tf.placeholder(tf.float32, [nenv, nlstm*2]) #states
-        with tf.variable_scope("model", reuse=reuse):
-            h = conv(tf.cast(X, tf.float32)/255., 'c1', nf=32, rf=8, stride=4, init_scale=np.sqrt(2))
-            h2 = conv(h, 'c2', nf=64, rf=4, stride=2, init_scale=np.sqrt(2))
-            h3 = conv(h2, 'c3', nf=64, rf=3, stride=1, init_scale=np.sqrt(2))
-            h3 = conv_to_fc(h3)
-            h4 = fc(h3, 'fc1', nh=512, init_scale=np.sqrt(2))
-            xs = batch_to_seq(h4, nenv, nsteps)
-            ms = batch_to_seq(M, nenv, nsteps)
-            h5, snew = lnlstm(xs, ms, S, 'lstm1', nh=nlstm)
-            h5 = seq_to_batch(h5)
-            pi = fc(h5, 'pi', nact, act=lambda x:x)
-            vf = fc(h5, 'v', 1, act=lambda x:x)
+        input_channels = nc * nstack
 
-        v0 = vf[:, 0]
-        a0 = sample(pi)
-        self.initial_state = np.zeros((nenv, nlstm*2), dtype=np.float32)
+        self.cnn = NatureCNN(input_channels)
 
-        def step(ob, state, mask):
-            a, v, s = sess.run([a0, v0, snew], {X:ob, S:state, M:mask})
-            return a, v, s
+        self.pi = nn.Linear(512, ac_space.n)
+        self.vf = nn.Linear(512, 1)
 
-        def value(ob, state, mask):
-            return sess.run(v0, {X:ob, S:state, M:mask})
+        init_weights(self.pi)
+        init_weights(self.vf)
 
-        self.X = X
-        self.M = M
-        self.S = S
-        self.pi = pi
-        self.vf = vf
-        self.step = step
-        self.value = value
+        self.initial_state = []
 
-class LstmPolicy(object):
+    def forward(self, x):
 
-    def __init__(self, sess, ob_space, ac_space, nenv, nsteps, nstack, nlstm=256, reuse=False):
-        nbatch = nenv*nsteps
+        features = self.cnn(x)
+
+        logits = self.pi(features)
+        value = self.vf(features)
+
+        return logits, value
+
+    def step(self, obs):
+
+        obs = torch.tensor(obs).float()
+
+        with torch.no_grad():
+
+            logits, value = self.forward(obs)
+
+            action = sample(logits)
+
+        return (
+            action.cpu().numpy(),
+            value.cpu().numpy(),
+            []
+        )
+
+    def value(self, obs):
+
+        obs = torch.tensor(obs).float()
+
+        with torch.no_grad():
+            _, value = self.forward(obs)
+
+        return value.cpu().numpy()
+
+
+# =========================================================
+# MLP Policy (MovingDot)
+# =========================================================
+
+class MlpPolicy(nn.Module):
+
+    def __init__(self, ob_space, ac_space, nstack):
+
+        super().__init__()
+
         nh, nw, nc = ob_space.shape
-        ob_shape = (nbatch, nh, nw, nc*nstack)
-        nact = ac_space.n
-        X = tf.placeholder(tf.uint8, ob_shape) #obs
-        M = tf.placeholder(tf.float32, [nbatch]) #mask (done t-1)
-        S = tf.placeholder(tf.float32, [nenv, nlstm*2]) #states
-        with tf.variable_scope("model", reuse=reuse):
-            h = conv(tf.cast(X, tf.float32)/255., 'c1', nf=32, rf=8, stride=4, init_scale=np.sqrt(2))
-            h2 = conv(h, 'c2', nf=64, rf=4, stride=2, init_scale=np.sqrt(2))
-            h3 = conv(h2, 'c3', nf=64, rf=3, stride=1, init_scale=np.sqrt(2))
-            h3 = conv_to_fc(h3)
-            h4 = fc(h3, 'fc1', nh=512, init_scale=np.sqrt(2))
-            xs = batch_to_seq(h4, nenv, nsteps)
-            ms = batch_to_seq(M, nenv, nsteps)
-            h5, snew = lstm(xs, ms, S, 'lstm1', nh=nlstm)
-            h5 = seq_to_batch(h5)
-            pi = fc(h5, 'pi', nact, act=lambda x:x)
-            vf = fc(h5, 'v', 1, act=lambda x:x)
 
-        v0 = vf[:, 0]
-        a0 = sample(pi)
-        self.initial_state = np.zeros((nenv, nlstm*2), dtype=np.float32)
+        input_dim = nh * nw
 
-        def step(ob, state, mask):
-            a, v, s = sess.run([a0, v0, snew], {X:ob, S:state, M:mask})
-            return a, v, s
+        self.fc1 = nn.Linear(input_dim, 2048)
+        self.fc2 = nn.Linear(2048, 1024)
+        self.fc3 = nn.Linear(1024, 512)
 
-        def value(ob, state, mask):
-            return sess.run(v0, {X:ob, S:state, M:mask})
+        self.pi = nn.Linear(512, ac_space.n)
+        self.vf = nn.Linear(512, 1)
 
-        self.X = X
-        self.M = M
-        self.S = S
-        self.pi = pi
-        self.vf = vf
-        self.step = step
-        self.value = value
+        self.apply(init_weights)
 
-class CnnPolicy(object):
+        self.initial_state = []
 
-    def __init__(self, sess, ob_space, ac_space, nenv, nsteps, nstack, reuse=False):
-        nbatch = nenv*nsteps
+    def forward(self, x):
+
+        x = x[:, :, :, -1] / 255.0
+
+        x = x.reshape(x.shape[0], -1)
+
+        x = F.relu(self.fc1(x))
+        x = F.relu(self.fc2(x))
+        x = F.relu(self.fc3(x))
+
+        logits = self.pi(x)
+        value = self.vf(x)
+
+        return logits, value
+
+    def step(self, obs):
+
+        obs = torch.tensor(obs).float()
+
+        with torch.no_grad():
+
+            logits, value = self.forward(obs)
+
+            action = sample(logits)
+
+        return (
+            action.cpu().numpy(),
+            value.cpu().numpy(),
+            []
+        )
+
+
+# =========================================================
+# LSTM Policy
+# =========================================================
+
+class LstmPolicy(nn.Module):
+
+    def __init__(self, ob_space, ac_space, nstack, nlstm=256):
+
+        super().__init__()
+
         nh, nw, nc = ob_space.shape
-        ob_shape = (nbatch, nh, nw, nc*nstack)
-        nact = ac_space.n
-        X = tf.placeholder(tf.uint8, ob_shape) #obs
-        with tf.variable_scope("model", reuse=reuse):
-            h = conv(tf.cast(X, tf.float32)/255., 'c1', nf=32, rf=8, stride=4, init_scale=np.sqrt(2))
-            h2 = conv(h, 'c2', nf=64, rf=4, stride=2, init_scale=np.sqrt(2))
-            h3 = conv(h2, 'c3', nf=64, rf=3, stride=1, init_scale=np.sqrt(2))
-            h3 = conv_to_fc(h3)
-            h4 = fc(h3, 'fc1', nh=512, init_scale=np.sqrt(2))
-            pi = fc(h4, 'pi', nact, act=lambda x:x)
-            vf = fc(h4, 'v', 1, act=lambda x:x)
+        input_channels = nc * nstack
 
-        v0 = vf[:, 0]
-        a0 = sample(pi)
-        self.initial_state = [] #not stateful
+        self.cnn = NatureCNN(input_channels)
 
-        def step(ob, *_args, **_kwargs):
-            a, v = sess.run([a0, v0], {X:ob})
-            return a, v, [] #dummy state
+        self.lstm = nn.LSTMCell(512, nlstm)
 
-        def value(ob, *_args, **_kwargs):
-            return sess.run(v0, {X:ob})
+        self.pi = nn.Linear(nlstm, ac_space.n)
+        self.vf = nn.Linear(nlstm, 1)
 
-        self.X = X
-        self.pi = pi
-        self.vf = vf
-        self.step = step
-        self.value = value
+        self.nlstm = nlstm
+
+        self.initial_state = np.zeros((1, nlstm * 2), dtype=np.float32)
+
+    def forward(self, x, state, mask):
+
+        features = self.cnn(x)
+
+        h, c = torch.chunk(state, 2, dim=1)
+
+        mask = mask.unsqueeze(1)
+
+        h = h * mask
+        c = c * mask
+
+        h, c = self.lstm(features, (h, c))
+
+        logits = self.pi(h)
+        value = self.vf(h)
+
+        new_state = torch.cat([h, c], dim=1)
+
+        return logits, value, new_state
+
+    def step(self, obs, state, mask):
+
+        obs = torch.tensor(obs).float()
+        state = torch.tensor(state).float()
+        mask = torch.tensor(mask).float()
+
+        with torch.no_grad():
+
+            logits, value, new_state = self.forward(obs, state, mask)
+
+            action = sample(logits)
+
+        return (
+            action.cpu().numpy(),
+            value.cpu().numpy(),
+            new_state.cpu().numpy()
+        )
 
 
-class MlpPolicy(object):
+# =========================================================
+# LayerNorm LSTM Policy
+# =========================================================
 
-    def __init__(self,
-                 sess,
-                 ob_space,
-                 ac_space,
-                 nenv,
-                 nsteps,
-                 nstack,
-                 reuse=False):
-        nbatch = nenv*nsteps
+class LayerNormLSTMCell(nn.Module):
+
+    def __init__(self, input_size, hidden_size):
+
+        super().__init__()
+
+        self.hidden_size = hidden_size
+
+        self.ih = nn.Linear(input_size, 4 * hidden_size)
+        self.hh = nn.Linear(hidden_size, 4 * hidden_size)
+
+        self.ln_i = nn.LayerNorm(4 * hidden_size)
+        self.ln_h = nn.LayerNorm(4 * hidden_size)
+        self.ln_c = nn.LayerNorm(hidden_size)
+
+        self.apply(init_weights)
+
+    def forward(self, x, hidden):
+
+        h, c = hidden
+
+        gates = self.ln_i(self.ih(x)) + self.ln_h(self.hh(h))
+
+        i, f, g, o = gates.chunk(4, 1)
+
+        i = torch.sigmoid(i)
+        f = torch.sigmoid(f)
+        o = torch.sigmoid(o)
+        g = torch.tanh(g)
+
+        c_new = f * c + i * g
+        h_new = o * torch.tanh(self.ln_c(c_new))
+
+        return h_new, c_new
+
+
+class LnLstmPolicy(nn.Module):
+
+    def __init__(self, ob_space, ac_space, nstack, nlstm=256):
+
+        super().__init__()
+
         nh, nw, nc = ob_space.shape
-        ob_shape = (nbatch, nh, nw, nc*nstack)
-        nact = ac_space.n
-        X = tf.placeholder(tf.uint8, ob_shape)  # obs
-        with tf.variable_scope("model", reuse=reuse):
-            x = tf.cast(X, tf.float32)/255.
+        input_channels = nc * nstack
 
-            # Only look at the most recent frame
-            x = x[:, :, :, -1]
+        self.cnn = NatureCNN(input_channels)
 
-            w, h = x.get_shape()[1:]
-            x = tf.reshape(x, [-1, int(w * h)])
-            x = fc(x, 'fc1', nh=2048, init_scale=np.sqrt(2))
-            x = fc(x, 'fc2', nh=1024, init_scale=np.sqrt(2))
-            x = fc(x, 'fc3', nh=512,  init_scale=np.sqrt(2))
-            pi = fc(x, 'pi', nact, act=lambda x: x)
-            vf = fc(x, 'v', 1, act=lambda x: x)
+        self.lnlstm = LayerNormLSTMCell(512, nlstm)
 
-        v0 = vf[:, 0]
-        a0 = sample(pi)
-        self.initial_state = []  # not stateful
+        self.pi = nn.Linear(nlstm, ac_space.n)
+        self.vf = nn.Linear(nlstm, 1)
 
-        def step(ob, *_args, **_kwargs):
-            a, v = sess.run([a0, v0], {X: ob})
-            return a, v, []  # dummy state
+        self.initial_state = np.zeros((1, nlstm * 2), dtype=np.float32)
 
-        def value(ob, *_args, **_kwargs):
-            return sess.run(v0, {X: ob})
+    def forward(self, x, state, mask):
 
-        self.X = X
-        self.pi = pi
-        self.vf = vf
-        self.step = step
-        self.value = value
+        features = self.cnn(x)
+
+        h, c = torch.chunk(state, 2, dim=1)
+
+        mask = mask.unsqueeze(1)
+
+        h = h * mask
+        c = c * mask
+
+        h, c = self.lnlstm(features, (h, c))
+
+        logits = self.pi(h)
+        value = self.vf(h)
+
+        new_state = torch.cat([h, c], dim=1)
+
+        return logits, value, new_state
