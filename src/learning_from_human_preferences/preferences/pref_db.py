@@ -1,9 +1,11 @@
-import collections
-import collections.abc
+"""
+Preference database utilities.
 
-collections.MutableMapping = collections.abc.MutableMapping
-collections.Mapping = collections.abc.Mapping
-collections.Sequence = collections.abc.Sequence
+Refactored version of the original implementation with:
+- modern Python style
+- TensorBoard logging
+- same logical behaviour
+"""
 
 import copy
 import gzip
@@ -11,189 +13,289 @@ import pickle
 import queue
 import time
 import zlib
+from dataclasses import dataclass, field
 from threading import Lock, Thread
+from typing import Dict, List, Tuple, Iterator
 
-from tensorflow.summary import create_file_writer
-
-writer = create_file_writer("runs")
 import numpy as np
+from torch.utils.tensorboard import SummaryWriter
 
 
+# ----------------------------------------------------------
+# TensorBoard writer
+# ----------------------------------------------------------
+
+writer = SummaryWriter("runs/preferences")
+
+
+# ----------------------------------------------------------
+# Segment
+# ----------------------------------------------------------
+
+@dataclass
 class Segment:
     """
-    A short recording of agent's behaviour in the environment,
-    consisting of a number of video frames and the rewards it received
-    during those frames.
+    A short recording of agent behaviour consisting of frames and rewards.
     """
 
-    def __init__(self):
-        self.frames = []
-        self.rewards = []
-        self.hash = None
+    frames: List[np.ndarray] = field(default_factory=list)
+    rewards: List[float] = field(default_factory=list)
+    hash: int | None = None
 
-    def append(self, frame, reward):
+    def append(self, frame: np.ndarray, reward: float) -> None:
         self.frames.append(frame)
         self.rewards.append(reward)
 
-    def finalise(self, seg_id=None):
+    def finalize(self, seg_id: int | None = None) -> None:
         if seg_id is not None:
             self.hash = seg_id
         else:
-            # This looks expensive, but don't worry -
-            # it only takes about 0.5 ms.
-            self.hash = hash(np.array(self.frames).tostring())
+            self.hash = hash(np.asarray(self.frames).tobytes())
 
-    def __len__(self):
+    def __len__(self) -> int:
         return len(self.frames)
 
 
-class CompressedDict(collections.abc.MutableMapping):
+# ----------------------------------------------------------
+# Compressed dictionary
+# ----------------------------------------------------------
+
+class CompressedDict:
+    """
+    Dictionary storing compressed objects.
+    """
 
     def __init__(self):
-        self.store = dict()
+        self._store: Dict[int, bytes] = {}
 
-    def __getitem__(self, key):
-        return pickle.loads(zlib.decompress(self.store[key]))
+    def __getitem__(self, key: int):
+        return pickle.loads(zlib.decompress(self._store[key]))
 
-    def __setitem__(self, key, value):
-        self.store[key] = zlib.compress(pickle.dumps(value))
+    def __setitem__(self, key: int, value):
+        self._store[key] = zlib.compress(pickle.dumps(value))
 
-    def __delitem__(self, key):
-        del self.store[key]
+    def __delitem__(self, key: int):
+        del self._store[key]
 
-    def __iter__(self):
-        return iter(self.store)
+    def __iter__(self) -> Iterator[int]:
+        return iter(self._store)
 
-    def __len__(self):
-        return len(self.store)
+    def __len__(self) -> int:
+        return len(self._store)
 
-    def __keytransform__(self, key):
-        return key
+    def keys(self):
+        return self._store.keys()
 
+
+# ----------------------------------------------------------
+# Preference database
+# ----------------------------------------------------------
 
 class PrefDB:
     """
-    A circular database of preferences about pairs of segments.
-
-    For each preference, we store the preference itself
-    (mu in the paper) and the two segments the preference refers to.
-    Segments are stored with deduplication - so that if multiple
-    preferences refer to the same segment, the segment is only stored once.
+    Circular database storing preferences over pairs of segments.
     """
 
-    def __init__(self, maxlen):
-        self.segments = CompressedDict()
-        self.seg_refs = {}
-        self.prefs = []
+    def __init__(self, maxlen: int):
+
+        self.segments: CompressedDict = CompressedDict()
+        self.segment_references: Dict[int, int] = {}
+
+        self.preferences: List[Tuple[int, int, np.ndarray]] = []
+
         self.maxlen = maxlen
 
-    def append(self, s1, s2, pref):
-        k1 = hash(np.array(s1).tostring())
-        k2 = hash(np.array(s2).tostring())
+    # ------------------------------------------------------
 
-        for k, s in zip([k1, k2], [s1, s2]):
-            if k not in self.segments.keys():
-                self.segments[k] = s
-                self.seg_refs[k] = 1
+    def append(self, seg1, seg2, preference):
+
+        key1 = hash(np.asarray(seg1).tobytes())
+        key2 = hash(np.asarray(seg2).tobytes())
+
+        for key, segment in zip([key1, key2], [seg1, seg2]):
+
+            if key not in self.segments.keys():
+                self.segments[key] = segment
+                self.segment_references[key] = 1
             else:
-                self.seg_refs[k] += 1
+                self.segment_references[key] += 1
 
-        tup = (k1, k2, pref)
-        self.prefs.append(tup)
+        self.preferences.append((key1, key2, preference))
 
-        if len(self.prefs) > self.maxlen:
-            self.del_first()
+        if len(self.preferences) > self.maxlen:
+            self._delete_first()
 
-    def del_first(self):
-        self.del_pref(0)
+    # ------------------------------------------------------
 
-    def del_pref(self, n):
-        if n >= len(self.prefs):
-            raise IndexError("Preference {} doesn't exist".format(n))
-        k1, k2, _ = self.prefs[n]
-        for k in [k1, k2]:
-            if self.seg_refs[k] == 1:
-                del self.segments[k]
-                del self.seg_refs[k]
+    def _delete_first(self):
+        self.delete_preference(0)
+
+    # ------------------------------------------------------
+
+    def delete_preference(self, index: int):
+
+        if index >= len(self.preferences):
+            raise IndexError(f"Preference {index} does not exist")
+
+        key1, key2, _ = self.preferences[index]
+
+        for key in [key1, key2]:
+
+            if self.segment_references[key] == 1:
+                del self.segments[key]
+                del self.segment_references[key]
             else:
-                self.seg_refs[k] -= 1
-        del self.prefs[n]
+                self.segment_references[key] -= 1
 
-    def __len__(self):
-        return len(self.prefs)
+        del self.preferences[index]
 
-    def save(self, path):
-        with gzip.open(path, 'wb') as pkl_file:
-            pickle.dump(self, pkl_file)
+    # ------------------------------------------------------
+
+    def __len__(self) -> int:
+        return len(self.preferences)
+
+    # ------------------------------------------------------
+
+    def save(self, path: str):
+
+        with gzip.open(path, "wb") as f:
+            pickle.dump(self, f)
+
+    # ------------------------------------------------------
 
     @staticmethod
-    def load(path):
-        with gzip.open(path, 'rb') as pkl_file:
-            pref_db = pickle.load(pkl_file)
-        return pref_db
+    def load(path: str):
 
+        with gzip.open(path, "rb") as f:
+            return pickle.load(f)
+
+
+# ----------------------------------------------------------
+# Preference buffer
+# ----------------------------------------------------------
 
 class PrefBuffer:
     """
-    A helper class to manage asynchronous receiving of preferences on a
-    background thread.
+    Handles asynchronous reception of preferences.
     """
-    def __init__(self, db_train, db_val):
-        self.train_db = db_train
-        self.val_db = db_val
-        self.lock = Lock()
-        self.stop_recv = False
 
-    def start_recv_thread(self, pref_pipe):
-        self.stop_recv = False
-        Thread(target=self.recv_prefs, args=(pref_pipe, )).start()
+    def __init__(self, train_db: PrefDB, val_db: PrefDB):
+
+        self.train_db = train_db
+        self.val_db = val_db
+
+        self.lock = Lock()
+
+        self._stop_flag = False
+        self._thread: Thread | None = None
+
+        self.step = 0
+
+    # ------------------------------------------------------
+
+    def start_recv_thread(self, pref_queue):
+
+        self._stop_flag = False
+
+        self._thread = Thread(
+            target=self._recv_preferences,
+            args=(pref_queue,),
+            daemon=True
+        )
+
+        self._thread.start()
+
+    # ------------------------------------------------------
 
     def stop_recv_thread(self):
-        self.stop_recv = True
 
-    def recv_prefs(self, pref_pipe):
-        n_recvd = 0
-        while not self.stop_recv:
+        self._stop_flag = True
+
+        if self._thread is not None:
+            self._thread.join()
+
+    # ------------------------------------------------------
+
+    def _recv_preferences(self, pref_queue):
+
+        received = 0
+
+        while not self._stop_flag:
+
             try:
-                s1, s2, pref = pref_pipe.get(block=True, timeout=1)
+                seg1, seg2, preference = pref_queue.get(timeout=1)
             except queue.Empty:
                 continue
-            n_recvd += 1
 
-            val_fraction = self.val_db.maxlen / (self.val_db.maxlen +
-                                                 self.train_db.maxlen)
+            received += 1
+            self.step += 1
 
-            self.lock.acquire(blocking=True)
-            if np.random.rand() < val_fraction:
-                self.val_db.append(s1, s2, pref)
-                easy_tf_log.tflog('val_db_len', len(self.val_db))
-            else:
-                self.train_db.append(s1, s2, pref)
-                easy_tf_log.tflog('train_db_len', len(self.train_db))
-            self.lock.release()
+            validation_fraction = (
+                self.val_db.maxlen /
+                (self.val_db.maxlen + self.train_db.maxlen)
+            )
 
-            easy_tf_log.tflog('n_prefs_recvd', n_recvd)
+            with self.lock:
 
-    def train_db_len(self):
+                if np.random.rand() < validation_fraction:
+                    self.val_db.append(seg1, seg2, preference)
+                else:
+                    self.train_db.append(seg1, seg2, preference)
+
+                # ----------------------------------
+                # TensorBoard logging
+                # ----------------------------------
+
+                writer.add_scalar(
+                    "preferences/train_db_size",
+                    len(self.train_db),
+                    self.step,
+                )
+
+                writer.add_scalar(
+                    "preferences/val_db_size",
+                    len(self.val_db),
+                    self.step,
+                )
+
+                writer.add_scalar(
+                    "preferences/total_received",
+                    received,
+                    self.step,
+                )
+
+    # ------------------------------------------------------
+
+    def train_db_len(self) -> int:
         return len(self.train_db)
 
-    def val_db_len(self):
+    def val_db_len(self) -> int:
         return len(self.val_db)
 
+    # ------------------------------------------------------
+
     def get_dbs(self):
-        self.lock.acquire(blocking=True)
-        train_copy = copy.deepcopy(self.train_db)
-        val_copy = copy.deepcopy(self.val_db)
-        self.lock.release()
+
+        with self.lock:
+
+            train_copy = copy.deepcopy(self.train_db)
+            val_copy = copy.deepcopy(self.val_db)
+
         return train_copy, val_copy
 
-    def wait_until_len(self, min_len):
+    # ------------------------------------------------------
+
+    def wait_until_len(self, minimum_length: int):
+
         while True:
-            self.lock.acquire()
-            train_len = len(self.train_db)
-            val_len = len(self.val_db)
-            self.lock.release()
-            if train_len >= min_len and val_len != 0:
+
+            with self.lock:
+                train_len = len(self.train_db)
+                val_len = len(self.val_db)
+
+            if train_len >= minimum_length and val_len > 0:
                 break
-            print("Waiting for preferences; {} so far".format(train_len))
+
+            print(f"Waiting for preferences; {train_len} collected")
+
             time.sleep(5.0)
