@@ -10,10 +10,10 @@ from multiprocessing import Process, Queue
 
 import cloudpickle
 
-from agents.a2c.a2c import learn
-from agents.a2c.policies import CnnPolicy, MlpPolicy
-from agents.common import set_global_seeds
-from agents.common.vec_env.dummy_vec_env import DummyVecEnv
+from learning_from_human_preferences.agents.a2c.a2c import learn
+from learning_from_human_preferences.agents.a2c.policies import CnnPolicy, MlpPolicy
+from learning_from_human_preferences.agents.common import set_global_seeds
+from learning_from_human_preferences.agents.common.vec_env.dummy_vec_env import DummyVecEnv
 
 from learning_from_human_preferences.training.params import (
     parse_args,
@@ -46,6 +46,10 @@ from learning_from_human_preferences.envs.utils import (
 
 mp.set_start_method("fork", force=True)
 
+import gymnasium as gym
+import ale_py
+
+gym.register_envs(ale_py)
 
 # ==========================================================
 # Main
@@ -97,17 +101,18 @@ def run(
 
     env_id = a2c_params["env_id"]
 
-    if env_id in {
+    if env_id in [
         "MovingDot-v0",
         "MovingDotNoFrameskip-v0",
         "MovingDotDiscreteNoFrameskip-v0",
-    }:
+    ]:
         reward_predictor_network = MovingDotRewardNetwork
 
-    elif env_id in {
-        "PongNoFrameskip-v4",
-        "EnduroNoFrameskip-v4",
-    }:
+    elif (
+            "Pong" in env_id
+            or "Enduro" in env_id
+            or env_id.startswith("ALE/")
+    ):
         reward_predictor_network = AtariRewardNetwork
 
     else:
@@ -298,17 +303,20 @@ def start_policy_training(
 
     env_id = a2c_params["env_id"]
 
-    if env_id in {
-        "MovingDot-v0",
+    # MovingDot environments → MLP
+    if env_id in [
         "MovingDotNoFrameskip-v0",
+        "MovingDot-v0",
         "MovingDotDiscreteNoFrameskip-v0",
-    }:
+    ]:
         policy_fn = MlpPolicy
 
-    elif env_id in {
-        "PongNoFrameskip-v4",
-        "EnduroNoFrameskip-v4",
-    }:
+    # Atari environments → CNN
+    elif (
+            "Pong" in env_id
+            or "Enduro" in env_id
+            or env_id.startswith("ALE/")
+    ):
         policy_fn = CnnPolicy
 
     else:

@@ -259,8 +259,9 @@ class FrameStack(gym.Wrapper):
 # =========================================================
 
 def wrap_deepmind(env, episode_life=True, clip_rewards=True):
-
-    assert "NoFrameskip" in env.spec.id
+    # Gymnasium Atari uses ALE/... names instead of *NoFrameskip*
+    if env.spec is not None and "NoFrameskip" not in env.spec.id and "ALE/" not in env.spec.id:
+        raise RuntimeError(f"Expected Atari environment, got {env.spec.id}")
 
     if episode_life:
         env = EpisodicLifeEnv(env)

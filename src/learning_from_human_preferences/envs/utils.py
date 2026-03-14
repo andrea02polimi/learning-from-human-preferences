@@ -9,7 +9,7 @@ import numpy as np
 import pyglet
 from scipy.ndimage import zoom
 
-from agents.common.atari_wrappers import wrap_deepmind
+from learning_from_human_preferences.agents.common.atari_wrappers import wrap_deepmind
 
 
 # ==========================================================

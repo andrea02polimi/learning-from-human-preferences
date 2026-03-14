@@ -15,17 +15,30 @@ class DummyVecEnv(object):
         self.env_id = env.spec.id
 
     def reset(self):
-        obs = [env.reset() for env in self.envs]
+        obs = []
+        for env in self.envs:
+            result = env.reset()
+            if isinstance(result, tuple):  # Gymnasium
+                o, _ = result
+            else:  # Gym legacy
+                o = result
+            obs.append(o)
         return np.stack(obs)
 
     def step(self, actions):
+        results = [env.step(a) for env, a in zip(self.envs, actions)]
+
         obs, rewards, dones, infos = [], [], [], []
-        for env, action in zip(self.envs, actions):
-            ob, r, done, info = env.step(action)
-            if done:
-                ob = env.reset()
-            obs.append(ob)
-            rewards.append(r)
+
+        for r in results:
+            if len(r) == 5:  # Gymnasium
+                o, rew, terminated, truncated, info = r
+                done = terminated or truncated
+            else:  # Gym legacy
+                o, rew, done, info = r
+
+            obs.append(o)
+            rewards.append(rew)
             dones.append(done)
             infos.append(info)
 
@@ -33,7 +46,7 @@ class DummyVecEnv(object):
             np.stack(obs),
             np.array(rewards),
             np.array(dones),
-            infos
+            infos,
         )
 
     def close(self):

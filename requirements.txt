@@ -33,3 +33,5 @@ lz4>=4.3
 
 # Compatibility helpers
 typing-extensions>=4.8
+
+scipy

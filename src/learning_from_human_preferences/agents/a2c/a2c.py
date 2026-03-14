@@ -13,8 +13,8 @@ import numpy as np
 import torch
 import torch.nn.functional as F
 
-from agents.common import set_global_seeds, explained_variance
-from agents.a2c.utils import discount_with_dones
+from learning_from_human_preferences.agents.common import set_global_seeds, explained_variance
+from learning_from_human_preferences.agents.a2c.utils import discount_with_dones
 from learning_from_human_preferences.preferences.pref_db import Segment
 
 
@@ -281,18 +281,16 @@ class Runner:
 
             mb_rewards = rewards_all.reshape(nenvs, self.nsteps)
 
-        last_values = self.model.value(
-            self.obs,
-            self.states,
-            self.dones,
-        ).tolist()
+        last_values = np.asarray(
+            self.model.value(self.obs, self.states, self.dones)
+        ).flatten().tolist()
 
         for n, (rewards, dones, value) in enumerate(
-            zip(mb_rewards, mb_dones, last_values)
+                zip(mb_rewards, mb_dones, last_values)
         ):
 
-            rewards = rewards.tolist()
-            dones = dones.tolist()
+            rewards = np.asarray(rewards).flatten().tolist()
+            dones = np.asarray(dones).flatten().tolist()
 
             if dones[-1] == 0:
 
@@ -331,18 +329,24 @@ class Runner:
 def learn(
     policy,
     env,
-    seg_pipe,
+    seed,
     start_policy_training_pipe,
-    episode_vid_queue,
+    seg_pipe,
     reward_predictor,
+    lr_scheduler,
     ckpt_save_dir,
-    gen_segments,
-    seed=0,
+    episode_vid_queue=None,
+    gen_segments=False,
     total_timesteps=int(80e6),
     nsteps=5,
     nstack=4,
     gamma=0.99,
-    lr_scheduler=None,
+    ent_coef=0.01,
+    vf_coef=0.5,
+    max_grad_norm=0.5,
+    alpha=0.99,
+    epsilon=1e-5,
+    **_
 ):
 
     set_global_seeds(seed)
@@ -357,6 +361,11 @@ def learn(
         ac_space,
         nstack,
         lr_scheduler,
+        ent_coef=ent_coef,
+        vf_coef=vf_coef,
+        max_grad_norm=max_grad_norm,
+        alpha=alpha,
+        epsilon=epsilon,
     )
 
     # ----------------------------------------------------
@@ -377,12 +386,12 @@ def learn(
 
     print("Collecting initial segments")
 
-    while True:
-
-        runner.run()
-
-        if start_policy_training_pipe.get():
-            break
+    # Skip segment collection when training with original rewards
+    if reward_predictor is not None:
+        while True:
+            runner.run()
+            if start_policy_training_pipe.get():
+                break
 
     # ----------------------------------------------------
     # Phase 2: RL with learned reward

@@ -1,6 +1,6 @@
 import numpy as np
 
-from agents.common.schedules import ConstantSchedule, PiecewiseSchedule
+from learning_from_human_preferences.agents.common.schedules import ConstantSchedule, PiecewiseSchedule
 
 
 def test_piecewise_schedule():

@@ -4,5 +4,5 @@ version = "0.1.0"
 description = "Deep reinforcement learning from human preferences"
 requires-python = ">=3.9"
 
-[tool.setuptools]
-package-dir = {"" = "src"}
+[tool.setuptools.packages.find]
+where = ["src"]
