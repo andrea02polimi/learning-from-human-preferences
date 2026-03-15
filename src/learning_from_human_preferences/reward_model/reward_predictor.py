@@ -224,7 +224,7 @@ class RewardPredictorEnsemble:
 
         start_time = time.time()
 
-        for _, batch in enumerate(batch_iter(prefs_train.prefs, 32, shuffle=True)):
+        for _, batch in enumerate(batch_iter(prefs_train.preferences, 32, shuffle=True)):
 
             self.train_step(batch, prefs_train)
 
@@ -281,11 +281,11 @@ class RewardPredictorEnsemble:
 
     def val_step(self, prefs_val):
 
-        batch_size = min(32, len(prefs_val.prefs))
+        batch_size = min(32, len(prefs_val.preferences))
 
-        idxs = np.random.choice(len(prefs_val.prefs), batch_size, replace=False)
+        idxs = np.random.choice(len(prefs_val.preferences), batch_size, replace=False)
 
-        batch = [prefs_val.prefs[i] for i in idxs]
+        batch = [prefs_val.preferences[i] for i in idxs]
 
         s1s = [prefs_val.segments[k1] for k1, k2, _ in batch]
         s2s = [prefs_val.segments[k2] for k1, k2, _ in batch]
