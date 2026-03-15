@@ -12,6 +12,7 @@ import queue
 import numpy as np
 import torch
 import torch.nn.functional as F
+from torch.utils.tensorboard import SummaryWriter
 
 from learning_from_human_preferences.agents.common import set_global_seeds, explained_variance
 from learning_from_human_preferences.agents.a2c.utils import discount_with_dones
@@ -347,6 +348,7 @@ def learn(
     alpha=0.99,
     epsilon=1e-5,
     rew_pred_reload_interval=500,
+    log_dir=None,
     **_
 ):
     """
@@ -364,6 +366,8 @@ def learn(
     """
 
     set_global_seeds(seed)
+
+    writer = SummaryWriter(osp.join(log_dir, "a2c")) if log_dir is not None else None
 
     nenvs = env.num_envs
     ob_space = env.observation_space
@@ -461,7 +465,17 @@ def learn(
                 f"ev {ev:.3f}"
             )
 
+            if writer is not None:
+                writer.add_scalar("a2c/policy_loss", policy_loss, update)
+                writer.add_scalar("a2c/value_loss", value_loss, update)
+                writer.add_scalar("a2c/entropy", entropy, update)
+                writer.add_scalar("a2c/explained_variance", ev, update)
+                writer.add_scalar("a2c/learning_rate", lr, update)
+
         if update % 1000 == 0:
             model.save(osp.join(ckpt_save_dir, "policy"), update)
 
     model.save(osp.join(ckpt_save_dir, "policy"), nupdates)
+
+    if writer is not None:
+        writer.close()

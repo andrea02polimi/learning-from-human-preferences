@@ -101,6 +101,7 @@ def _training_worker(
     rew_pred_ckpt_dir,      # None → use env rewards
     reward_network_fn,      # callable() → nn.Module  (or None)
     a2c_params,
+    log_dir,
 ):
     """Runs A2C in a separate process.  Non-daemon so it can spawn its own
     SubprocVecEnv workers without hitting Python's daemon restriction."""
@@ -131,6 +132,7 @@ def _training_worker(
         reward_predictor=reward_predictor,
         ckpt_save_dir=ckpt_dir,
         gen_segments=gen_segments,
+        log_dir=log_dir,
         **a2c_params,
     )
 
@@ -249,6 +251,7 @@ def _gather_initial_prefs(
             True,          # gen_segments
             None, None,    # no reward predictor
             extra,
+            log_dir,
         ),
     )
     trainer.start()
@@ -356,6 +359,7 @@ def _train_policy_original_rewards(a2c_params, ckpt_dir, env_id, episode_vid_que
             False,         # gen_segments=False → skip Phase 1
             None, None,
             extra,
+            log_dir,
         ),
     )
     trainer.start()
@@ -405,6 +409,7 @@ def _train_policy_with_preferences(
             rew_pred_ckpt_dir,     # reward predictor will be loaded from here
             reward_network_fn,
             extra,
+            log_dir,
         ),
     )
     trainer.start()
