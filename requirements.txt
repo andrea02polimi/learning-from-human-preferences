@@ -1,9 +1,8 @@
-# Core ML
+# Deep Learning
 torch>=2.1
 torchvision>=0.16
-torchaudio>=2.1
 
-# TensorBoard logging
+# TensorBoard
 tensorboard>=2.14
 
 # RL environments
@@ -15,23 +14,8 @@ ale-py>=0.8
 numpy>=1.24
 scipy>=1.10
 
-# Image processing
-pillow>=10.0
-
 # Rendering
 pyglet>=2.0
 
 # Utilities
 cloudpickle>=2.2
-tqdm>=4.66
-
-# Memory profiling (optional but used in code)
-memory-profiler>=0.61
-
-# Compression utilities
-lz4>=4.3
-
-# Compatibility helpers
-typing-extensions>=4.8
-
-scipy
