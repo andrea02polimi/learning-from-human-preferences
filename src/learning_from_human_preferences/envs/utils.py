@@ -85,7 +85,6 @@ class Im:
             self.window = pyglet.window.Window(
                 width=width,
                 height=height,
-                display=self.display
             )
 
             self.width = width
@@ -94,12 +93,16 @@ class Im:
 
         assert arr.shape == (self.height, self.width)
 
+        # GL_LUMINANCE is removed in OpenGL 3.x+ Core Profile (macOS).
+        # Convert grayscale (H, W) to RGB (H, W, 3).
+        rgb = np.stack([arr, arr, arr], axis=-1)
+
         image = pyglet.image.ImageData(
             self.width,
             self.height,
-            "L",
-            arr.tobytes(),
-            pitch=-self.width
+            "RGB",
+            rgb.tobytes(),
+            pitch=-self.width * 3,
         )
 
         self.window.clear()
@@ -121,6 +124,59 @@ class Im:
 
 
 # ==========================================================
+# Video renderer worker
+# Top-level function required for spawn pickling on macOS.
+# Runs in a subprocess so pyglet creates its window on that
+# subprocess's main thread — satisfying macOS Cocoa rules.
+# ==========================================================
+
+def _render_worker(vid_queue, mode, zoom_factor, playback_speed):
+
+    viewer = Im()
+
+    def get_most_recent():
+        item = vid_queue.get(block=True)
+        while True:
+            try:
+                item = vid_queue.get(block=True, timeout=0.1)
+            except queue.Empty:
+                break
+        return item
+
+    frames = vid_queue.get(block=True)
+    t = 0
+
+    while True:
+
+        width = frames[t].shape[1]
+        x = int((t / len(frames)) * width)
+        frames[t][-1][x] = 128
+
+        viewer.imshow(zoom(frames[t], zoom_factor))
+
+        # play_through_mode = 0
+        if mode == 0:
+
+            t += playback_speed
+
+            if t >= len(frames):
+                frames = get_most_recent()
+                t = 0
+            else:
+                time.sleep(1 / 60)
+
+        # restart_on_get_mode = 1
+        else:
+
+            try:
+                frames = vid_queue.get(block=False)
+                t = 0
+            except queue.Empty:
+                t = (t + playback_speed) % len(frames)
+                time.sleep(1 / 60)
+
+
+# ==========================================================
 # Video renderer
 # ==========================================================
 
@@ -133,77 +189,21 @@ class VideoRenderer:
 
         assert mode in (
             VideoRenderer.play_through_mode,
-            VideoRenderer.restart_on_get_mode
+            VideoRenderer.restart_on_get_mode,
         )
 
-        self.mode = mode
-        self.vid_queue = vid_queue
-        self.zoom_factor = zoom_factor
-        self.playback_speed = playback_speed
-
-        self.proc = Process(target=self.render)
+        self.proc = Process(
+            target=_render_worker,
+            args=(vid_queue, mode, zoom_factor, playback_speed),
+            daemon=True,
+        )
         self.proc.start()
 
     def stop(self):
-        self.proc.terminate()
 
-    def render(self):
-
-        viewer = Im()
-
-        frames = self.vid_queue.get(block=True)
-
-        t = 0
-
-        while True:
-
-            width = frames[t].shape[1]
-
-            fraction_played = t / len(frames)
-            x = int(fraction_played * width)
-
-            frames[t][-1][x] = 128
-
-            zoomed_frame = zoom(frames[t], self.zoom_factor)
-
-            viewer.imshow(zoomed_frame)
-
-            if self.mode == VideoRenderer.play_through_mode:
-
-                t += self.playback_speed
-
-                if t >= len(frames):
-
-                    frames = self.get_queue_most_recent()
-                    t = 0
-
-                else:
-
-                    time.sleep(1 / 60)
-
-            else:
-
-                try:
-                    frames = self.vid_queue.get(block=False)
-                    t = 0
-
-                except queue.Empty:
-
-                    t = (t + self.playback_speed) % len(frames)
-
-                    time.sleep(1 / 60)
-
-    def get_queue_most_recent(self):
-
-        item = self.vid_queue.get(block=True)
-
-        while True:
-            try:
-                item = self.vid_queue.get(block=True, timeout=0.1)
-            except queue.Empty:
-                break
-
-        return item
+        if self.proc is not None and self.proc.is_alive():
+            self.proc.terminate()
+            self.proc.join(timeout=2)
 
 
 # ==========================================================
