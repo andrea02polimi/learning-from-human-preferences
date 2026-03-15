@@ -18,13 +18,6 @@ from learning_from_human_preferences.envs.utils import VideoRenderer
 
 
 # ----------------------------------------------------------
-# TensorBoard writer
-# ----------------------------------------------------------
-
-writer = SummaryWriter("runs/preferences_interface")
-
-
-# ----------------------------------------------------------
 # Preference Interface
 # ----------------------------------------------------------
 
@@ -58,6 +51,8 @@ class PrefInterface:
         self.max_segments = max_segs
 
         self.step = 0
+
+        self.writer = SummaryWriter(log_dir) if log_dir is not None else None
 
     # ------------------------------------------------------
 
@@ -160,9 +155,10 @@ class PrefInterface:
         # TensorBoard logging
         self.step += 1
 
-        writer.add_scalar("segments/index", self.segment_index, self.step)
-        writer.add_scalar("segments/received", received, self.step)
-        writer.add_scalar("segments/buffer_size", len(self.segments), self.step)
+        if self.writer is not None:
+            self.writer.add_scalar("segments/index", self.segment_index, self.step)
+            self.writer.add_scalar("segments/received", received, self.step)
+            self.writer.add_scalar("segments/buffer_size", len(self.segments), self.step)
 
     # ------------------------------------------------------
 

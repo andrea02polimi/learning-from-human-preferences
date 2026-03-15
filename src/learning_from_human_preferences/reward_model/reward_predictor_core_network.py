@@ -108,25 +108,25 @@ class AtariRewardNetwork(nn.Module):
     """
     Exact CNN architecture from the original implementation.
 
-    Conv layers:
+    Input:  (N, 84, 84, 4)  — NHWC, uint8
+    Output: (N,)             — scalar reward per frame
 
-        Conv(7x7, stride 3, 16)
-        Conv(5x5, stride 2, 16)
-        Conv(3x3, stride 1, 16)
-        Conv(3x3, stride 1, 16)
+    Conv layers (NCHW after permute):
+        Conv(7x7, stride=3, 16)  → 16 × 26 × 26
+        Conv(5x5, stride=2, 16)  → 16 × 11 × 11
+        Conv(3x3, stride=1, 16)  → 16 ×  9 ×  9
+        Conv(3x3, stride=1, 16)  → 16 ×  7 ×  7  → flatten → 784
 
     Followed by:
+        FC(784 → 64)
+        FC(64  →  1)
 
-        FC 64
-        FC 1
-
-    Activations:
-        LeakyReLU (α = 0.01)
-
-    Regularization:
-        BatchNorm
-        Dropout after each conv
+    Activations:   LeakyReLU(0.01)
+    Regularization: BatchNorm2d + Dropout after each conv (except last)
     """
+
+    # Flattened size for standard 84×84×4 Atari input.
+    _FLAT = 16 * 7 * 7  # = 784
 
     def __init__(self, input_channels=4, dropout_prob=0.5):
 
@@ -144,22 +144,17 @@ class AtariRewardNetwork(nn.Module):
 
         self.dropout = nn.Dropout(dropout_prob)
 
-        self.fc1 = None
-        self.fc2 = None
+        self.fc1 = nn.Linear(self._FLAT, 64)
+        self.fc2 = nn.Linear(64, 1)
 
         self.activation = nn.LeakyReLU(0.01)
 
-    def _build_fc(self, x):
-
-        flattened_size = x.view(x.size(0), -1).size(1)
-
-        self.fc1 = nn.Linear(flattened_size, 64)
-        self.fc2 = nn.Linear(64, 1)
-
     def forward(self, frames):
 
-        # original preprocessing
+        # frames: (N, 84, 84, 4) — NHWC uint8
+        # Conv2d requires NCHW → permute before processing.
         x = frames.float() / 255.0
+        x = x.permute(0, 3, 1, 2)   # (N, 4, 84, 84)
 
         x = self.conv1(x)
         x = self.bn1(x)
@@ -180,10 +175,7 @@ class AtariRewardNetwork(nn.Module):
         x = self.bn4(x)
         x = self.activation(x)
 
-        if self.fc1 is None:
-            self._build_fc(x)
-
-        x = torch.flatten(x, start_dim=1)
+        x = torch.flatten(x, start_dim=1)   # (N, 784)
 
         x = self.activation(self.fc1(x))
 

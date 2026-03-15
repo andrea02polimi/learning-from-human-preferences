@@ -77,6 +77,7 @@ def parse_args():
 def get_log_dir(args):
     if args.log_dir is not None:
         log_dir = args.log_dir
+        os.makedirs(log_dir, exist_ok=True)
     else:
         git_rev = get_git_rev()
         run_name = args.run_name + '_' + git_rev

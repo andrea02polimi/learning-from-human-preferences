@@ -47,6 +47,16 @@ class RewardPredictorNetwork(nn.Module):
 class RewardPredictorEnsemble:
     """
     Ensemble of reward predictors.
+
+    Args:
+        core_network: callable with no arguments that returns a nn.Module
+                      (e.g. AtariRewardNetwork or
+                       functools.partial(AtariRewardNetwork, dropout_prob=0.3))
+        lr:           Adam learning rate
+        n_preds:      ensemble size (paper uses 3)
+        log_dir:      experiment log directory for TensorBoard & checkpoints;
+                      pass None to disable both (inference-only mode)
+        device:       torch device string
     """
 
     def __init__(
@@ -56,41 +66,33 @@ class RewardPredictorEnsemble:
         n_preds=1,
         log_dir=None,
         device="cpu",
-        cluster_job_name=None,
-        cluster_dict=None,
-        batchnorm=False,
-        dropout=0.0,
     ):
 
         self.device = device
         self.n_preds = n_preds
 
-        # kept for compatibility with original code
-        self.cluster_job_name = cluster_job_name
-        self.cluster_dict = cluster_dict
-        self.batchnorm = batchnorm
-        self.dropout = dropout
-
         self.models = []
         self.optimizers = []
 
         for _ in range(n_preds):
-
             model = RewardPredictorNetwork(core_network()).to(device)
             optimizer = optim.Adam(model.parameters(), lr=lr)
-
             self.models.append(model)
             self.optimizers.append(optimizer)
 
-        self.writer_train = SummaryWriter(
-            osp.join(log_dir, "reward_predictor", "train")
-        )
-        self.writer_test = SummaryWriter(
-            osp.join(log_dir, "reward_predictor", "test")
-        )
-
-        self.checkpoint_dir = osp.join(log_dir, "reward_predictor_checkpoints")
-        os.makedirs(self.checkpoint_dir, exist_ok=True)
+        if log_dir is not None:
+            self.writer_train = SummaryWriter(
+                osp.join(log_dir, "reward_predictor", "train")
+            )
+            self.writer_test = SummaryWriter(
+                osp.join(log_dir, "reward_predictor", "test")
+            )
+            self.checkpoint_dir = osp.join(log_dir, "reward_predictor_checkpoints")
+            os.makedirs(self.checkpoint_dir, exist_ok=True)
+        else:
+            self.writer_train = None
+            self.writer_test = None
+            self.checkpoint_dir = None
 
         self.n_steps = 0
 
@@ -99,6 +101,9 @@ class RewardPredictorEnsemble:
     # ----------------------------------------------------------
 
     def save(self):
+
+        if self.checkpoint_dir is None:
+            raise RuntimeError("Cannot save: log_dir was not set")
 
         path = osp.join(self.checkpoint_dir, f"reward_predictor_{self.n_steps}.pt")
 
@@ -115,12 +120,30 @@ class RewardPredictorEnsemble:
 
     def load(self, path):
 
-        state = torch.load(path)
+        state = torch.load(path, weights_only=True)
 
         for m, s in zip(self.models, state["models"]):
             m.load_state_dict(s)
 
         self.n_steps = state["step"]
+
+        print(f"Loaded reward predictor checkpoint from {path}")
+
+    # ----------------------------------------------------------
+
+    @staticmethod
+    def latest_checkpoint(ckpt_dir):
+        """Return path of the latest checkpoint in ckpt_dir, or None."""
+        if not osp.exists(ckpt_dir):
+            return None
+        files = [
+            f for f in os.listdir(ckpt_dir)
+            if f.startswith("reward_predictor_") and f.endswith(".pt")
+        ]
+        if not files:
+            return None
+        files.sort(key=lambda f: int(f[len("reward_predictor_"):-len(".pt")]))
+        return osp.join(ckpt_dir, files[-1])
 
     # ----------------------------------------------------------
 
@@ -246,13 +269,13 @@ class RewardPredictorEnsemble:
 
             acc = (pred.argmax(dim=1) == targets).float().mean()
 
-            self.writer_train.add_scalar(
-                "reward_predictor_loss", loss.item(), self.n_steps
-            )
-
-            self.writer_train.add_scalar(
-                "reward_predictor_accuracy", acc.item(), self.n_steps
-            )
+            if self.writer_train is not None:
+                self.writer_train.add_scalar(
+                    "reward_predictor_loss", loss.item(), self.n_steps
+                )
+                self.writer_train.add_scalar(
+                    "reward_predictor_accuracy", acc.item(), self.n_steps
+                )
 
     # ----------------------------------------------------------
 
@@ -286,10 +309,10 @@ class RewardPredictorEnsemble:
 
                 acc = (pred.argmax(dim=1) == targets).float().mean()
 
-                self.writer_test.add_scalar(
-                    "reward_predictor_val_loss", loss.item(), self.n_steps
-                )
-
-                self.writer_test.add_scalar(
-                    "reward_predictor_val_accuracy", acc.item(), self.n_steps
-                )
+                if self.writer_test is not None:
+                    self.writer_test.add_scalar(
+                        "reward_predictor_val_loss", loss.item(), self.n_steps
+                    )
+                    self.writer_test.add_scalar(
+                        "reward_predictor_val_accuracy", acc.item(), self.n_steps
+                    )

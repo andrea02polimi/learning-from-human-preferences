@@ -22,13 +22,6 @@ from torch.utils.tensorboard import SummaryWriter
 
 
 # ----------------------------------------------------------
-# TensorBoard writer
-# ----------------------------------------------------------
-
-writer = SummaryWriter("runs/preferences")
-
-
-# ----------------------------------------------------------
 # Segment
 # ----------------------------------------------------------
 
@@ -179,9 +172,8 @@ class PrefBuffer:
     Handles asynchronous reception of preferences.
     """
 
-    def __init__(self, db_train: PrefDB, db_val: PrefDB):
+    def __init__(self, db_train: PrefDB, db_val: PrefDB, log_dir: str | None = None):
 
-        # keep original API used by run.py
         self.train_db = db_train
         self.val_db = db_val
 
@@ -191,6 +183,8 @@ class PrefBuffer:
         self._thread: Thread | None = None
 
         self.step = 0
+
+        self.writer = SummaryWriter(log_dir) if log_dir is not None else None
 
     # ------------------------------------------------------
 
@@ -247,23 +241,16 @@ class PrefBuffer:
                 # TensorBoard logging
                 # ----------------------------------
 
-                writer.add_scalar(
-                    "preferences/train_db_size",
-                    len(self.train_db),
-                    self.step,
-                )
-
-                writer.add_scalar(
-                    "preferences/val_db_size",
-                    len(self.val_db),
-                    self.step,
-                )
-
-                writer.add_scalar(
-                    "preferences/total_received",
-                    received,
-                    self.step,
-                )
+                if self.writer is not None:
+                    self.writer.add_scalar(
+                        "preferences/train_db_size", len(self.train_db), self.step,
+                    )
+                    self.writer.add_scalar(
+                        "preferences/val_db_size", len(self.val_db), self.step,
+                    )
+                    self.writer.add_scalar(
+                        "preferences/total_received", received, self.step,
+                    )
 
     # ------------------------------------------------------
 

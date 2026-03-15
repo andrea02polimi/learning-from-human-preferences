@@ -346,8 +346,22 @@ def learn(
     max_grad_norm=0.5,
     alpha=0.99,
     epsilon=1e-5,
+    rew_pred_reload_interval=500,
     **_
 ):
+    """
+    Two-phase A2C training loop.
+
+    Phase 1 (only when gen_segments=True):
+        Run rollouts with env rewards and send segments to seg_pipe.
+        Wait until start_policy_training_pipe signals True.
+
+    Phase 2:
+        Standard A2C training.  If reward_predictor is provided its checkpoint
+        is (re)loaded right after Phase 1 and then every
+        rew_pred_reload_interval updates so the policy tracks the latest
+        reward model trained in the main process.
+    """
 
     set_global_seeds(seed)
 
@@ -369,44 +383,48 @@ def learn(
     )
 
     # ----------------------------------------------------
-    # Phase 1: collect segments
+    # Phase 1: collect segments (if requested)
     # ----------------------------------------------------
 
-    runner = Runner(
-        env,
-        model,
-        nsteps,
-        nstack,
-        gamma,
-        gen_segments,
-        seg_pipe,
-        None,
-        episode_vid_queue,
-    )
+    if gen_segments:
 
-    print("Collecting initial segments")
+        runner = Runner(
+            env, model, nsteps, nstack, gamma,
+            gen_segments=True,
+            seg_pipe=seg_pipe,
+            reward_predictor=None,   # env rewards during Phase 1
+            episode_vid_queue=episode_vid_queue,
+        )
 
-    # Skip segment collection when training with original rewards
-    if reward_predictor is not None:
+        print("Phase 1: collecting segments…")
+
         while True:
             runner.run()
-            if start_policy_training_pipe.get():
-                break
+            try:
+                if start_policy_training_pipe.get_nowait():
+                    break
+            except queue.Empty:
+                pass
 
     # ----------------------------------------------------
-    # Phase 2: RL with learned reward
+    # Load / refresh reward predictor after Phase 1
+    # ----------------------------------------------------
+
+    if reward_predictor is not None and reward_predictor.checkpoint_dir is not None:
+        ckpt = reward_predictor.latest_checkpoint(reward_predictor.checkpoint_dir)
+        if ckpt:
+            reward_predictor.load(ckpt)
+
+    # ----------------------------------------------------
+    # Phase 2: RL training
     # ----------------------------------------------------
 
     runner = Runner(
-        env,
-        model,
-        nsteps,
-        nstack,
-        gamma,
-        gen_segments,
-        seg_pipe,
-        reward_predictor,
-        episode_vid_queue,
+        env, model, nsteps, nstack, gamma,
+        gen_segments=gen_segments,
+        seg_pipe=seg_pipe,
+        reward_predictor=reward_predictor,
+        episode_vid_queue=episode_vid_queue,
     )
 
     nbatch = nenvs * nsteps
@@ -417,13 +435,19 @@ def learn(
         obs, states, rewards, masks, actions, values = runner.run()
 
         policy_loss, value_loss, entropy, lr = model.train(
-            obs,
-            states,
-            rewards,
-            masks,
-            actions,
-            values,
+            obs, states, rewards, masks, actions, values,
         )
+
+        # Reload reward predictor from latest checkpoint periodically
+        if (
+            reward_predictor is not None
+            and reward_predictor.checkpoint_dir is not None
+            and rew_pred_reload_interval > 0
+            and update % rew_pred_reload_interval == 0
+        ):
+            ckpt = reward_predictor.latest_checkpoint(reward_predictor.checkpoint_dir)
+            if ckpt:
+                reward_predictor.load(ckpt)
 
         if update % 100 == 0:
 
@@ -433,17 +457,11 @@ def learn(
                 f"update {update} | "
                 f"policy_loss {policy_loss:.3f} | "
                 f"value_loss {value_loss:.3f} | "
-                f"entropy {entropy:.3f}"
+                f"entropy {entropy:.3f} | "
+                f"ev {ev:.3f}"
             )
 
         if update % 1000 == 0:
+            model.save(osp.join(ckpt_save_dir, "policy"), update)
 
-            model.save(
-                osp.join(ckpt_save_dir, "policy"),
-                update,
-            )
-
-    model.save(
-        osp.join(ckpt_save_dir, "policy"),
-        update,
-    )
+    model.save(osp.join(ckpt_save_dir, "policy"), nupdates)
