@@ -156,6 +156,7 @@ class Runner:
         seg_pipe,
         reward_predictor,
         episode_vid_queue,
+        segment_len=25,
     ):
 
         self.env = env
@@ -179,6 +180,7 @@ class Runner:
         self.seg_pipe = seg_pipe
         self.reward_predictor = reward_predictor
 
+        self.segment_len = segment_len
         self.segment = Segment()
 
         self.episode_vid_queue = episode_vid_queue
@@ -205,9 +207,9 @@ class Runner:
                 np.copy(e0_rew[step]),
             )
 
-            if len(self.segment) == 25 or e0_dones[step]:
+            if len(self.segment) == self.segment_len or e0_dones[step]:
 
-                while len(self.segment) < 25:
+                while len(self.segment) < self.segment_len:
                     self.segment.append(e0_obs[step], 0)
 
                 self.segment.finalize()
@@ -273,9 +275,7 @@ class Runner:
 
             mb_obs_all = mb_obs.reshape(
                 nenvs * self.nsteps,
-                84,
-                84,
-                4,
+                *mb_obs.shape[2:],
             )
 
             rewards_all = self.reward_predictor.reward(mb_obs_all)
@@ -349,6 +349,7 @@ def learn(
     epsilon=1e-5,
     rew_pred_reload_interval=500,
     log_dir=None,
+    segment_len=25,
     **_
 ):
     """
@@ -398,6 +399,7 @@ def learn(
             seg_pipe=seg_pipe,
             reward_predictor=None,   # env rewards during Phase 1
             episode_vid_queue=episode_vid_queue,
+            segment_len=segment_len,
         )
 
         print("Phase 1: collecting segments…")
@@ -429,6 +431,7 @@ def learn(
         seg_pipe=seg_pipe,
         reward_predictor=reward_predictor,
         episode_vid_queue=episode_vid_queue,
+        segment_len=segment_len,
     )
 
     nbatch = nenvs * nsteps

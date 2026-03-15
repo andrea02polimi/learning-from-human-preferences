@@ -33,11 +33,9 @@ import time
 from multiprocessing import Process, Queue
 
 import multiprocessing as mp
-mp.set_start_method("spawn", force=True)
 
 import gymnasium as gym
 import ale_py
-gym.register_envs(ale_py)
 
 from learning_from_human_preferences.agents.a2c.a2c import learn
 from learning_from_human_preferences.agents.a2c.policies import CnnPolicy, MlpPolicy
@@ -161,6 +159,9 @@ def _pref_interface_worker(synthetic_prefs, max_segs, pi_log_dir,
 # ============================================================
 
 def main():
+    mp.set_start_method("spawn", force=True)
+    gym.register_envs(ale_py)
+
     general_params, a2c_params, pref_params, rew_pred_params = parse_args()
 
     if general_params["debug"]:

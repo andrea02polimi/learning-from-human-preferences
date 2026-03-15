@@ -313,12 +313,16 @@ def make_env(env_id, seed=0):
 
     if env_id in moving_dot_envs:
 
-        import gym_moving_dot
+        try:
+            import gym_moving_dot  # noqa: F401
+        except ImportError:
+            raise ImportError(
+                f"gym_moving_dot is required for environment '{env_id}'. "
+                "Install it with: pip install gym-moving-dot"
+            )
 
         env = gym.make(env_id)
-
         env.reset(seed=seed)
-
         return env
 
     # ALE v5 environments (ALE/Enduro-v5, etc.) have frameskip=4 built-in.

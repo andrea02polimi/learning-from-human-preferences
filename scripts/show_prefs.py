@@ -30,9 +30,9 @@ def main():
     print("Preferred segment on the right")
 
     q = Queue()
-    VideoRenderer(q, zoom=2, mode=VideoRenderer.restart_on_get_mode)
+    VideoRenderer(q, zoom_factor=2, mode=VideoRenderer.restart_on_get_mode)
 
-    for k1, k2, pref in prefs.prefs:
+    for k1, k2, pref in prefs.preferences:
         if pref == (0.5, 0.5):
             continue
 

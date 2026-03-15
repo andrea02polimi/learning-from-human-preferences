@@ -33,7 +33,7 @@ def nhwc_to_nchw(x):
 
 class NatureCNN(nn.Module):
 
-    def __init__(self, input_channels):
+    def __init__(self, input_channels, height=84, width=84):
 
         super().__init__()
 
@@ -41,7 +41,15 @@ class NatureCNN(nn.Module):
         self.conv2 = nn.Conv2d(32, 64, 4, stride=2)
         self.conv3 = nn.Conv2d(64, 64, 3, stride=1)
 
-        self.fc = nn.Linear(3136, 512)
+        # Compute flatten size dynamically from actual input dimensions.
+        with torch.no_grad():
+            dummy = torch.zeros(1, input_channels, height, width)
+            flat = int(torch.flatten(
+                F.relu(self.conv3(F.relu(self.conv2(F.relu(self.conv1(dummy)))))),
+                start_dim=1,
+            ).shape[1])
+
+        self.fc = nn.Linear(flat, 512)
 
         self.apply(init_weights)
 
@@ -74,7 +82,7 @@ class CnnPolicy(nn.Module):
         nh, nw, nc = ob_space.shape
         input_channels = nc * nstack
 
-        self.cnn = NatureCNN(input_channels)
+        self.cnn = NatureCNN(input_channels, height=nh, width=nw)
 
         self.pi = nn.Linear(512, ac_space.n)
         self.vf = nn.Linear(512, 1)
@@ -189,7 +197,7 @@ class LstmPolicy(nn.Module):
         nh, nw, nc = ob_space.shape
         input_channels = nc * nstack
 
-        self.cnn = NatureCNN(input_channels)
+        self.cnn = NatureCNN(input_channels, height=nh, width=nw)
 
         self.lstm = nn.LSTMCell(512, nlstm)
 
@@ -288,7 +296,7 @@ class LnLstmPolicy(nn.Module):
         nh, nw, nc = ob_space.shape
         input_channels = nc * nstack
 
-        self.cnn = NatureCNN(input_channels)
+        self.cnn = NatureCNN(input_channels, height=nh, width=nw)
 
         self.lnlstm = LayerNormLSTMCell(512, nlstm)
 

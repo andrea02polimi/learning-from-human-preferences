@@ -25,8 +25,8 @@ class RewardPredictorNetwork(nn.Module):
 
         B, T = s1.shape[0], s1.shape[1]
 
-        s1_unrolled = s1.reshape(-1, 84, 84, 4)
-        s2_unrolled = s2.reshape(-1, 84, 84, 4)
+        s1_unrolled = s1.reshape(-1, *s1.shape[2:])
+        s2_unrolled = s2.reshape(-1, *s2.shape[2:])
 
         r1 = self.core_network(s1_unrolled)
         r2 = self.core_network(s2_unrolled)
