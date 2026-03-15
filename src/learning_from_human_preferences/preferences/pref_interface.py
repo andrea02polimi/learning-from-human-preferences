@@ -41,7 +41,7 @@ class PrefInterface:
             self.renderer = VideoRenderer(
                 vid_queue=self.video_queue,
                 mode=VideoRenderer.restart_on_get_mode,
-                zoom=4
+                zoom_factor=4
             )
         else:
             self.renderer = None

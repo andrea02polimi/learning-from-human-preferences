@@ -321,14 +321,13 @@ def make_env(env_id, seed=0):
 
         return env
 
-    env = gym.make(env_id)
+    # ALE v5 environments (ALE/Enduro-v5, etc.) have frameskip=4 built-in.
+    # Disable it so MaxAndSkipEnv in wrap_deepmind handles skipping instead.
+    if env_id.startswith("ALE/"):
+        env = gym.make(env_id, frameskip=1)
+    else:
+        env = gym.make(env_id)
 
     env.reset(seed=seed)
-
-    if env_id == "EnduroNoFrameskip-v4":
-
-        from enduro_wrapper import EnduroWrapper
-
-        env = EnduroWrapper(env)
 
     return wrap_deepmind(env)
